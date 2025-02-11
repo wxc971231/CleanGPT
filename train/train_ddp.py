@@ -1,22 +1,3 @@
-
-"""
-This training script can be run both on a single gpu in debug mode,
-and also in a larger training run with distributed data parallel (ddp).
-
-To run on a single GPU, example:
-$ python train.py --batch_size=32 --compile=False
-
-To run with DDP on 4 gpus on 1 node, example:
-$ torchrun --standalone --nproc_per_node=4 train.py
-
-To run with DDP on 4 gpus across 2 nodes, example:
-- Run on the first (master) node with example IP 123.456.123.456:
-$ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=0 --master_addr=123.456.123.456 --master_port=1234 train.py
-- Run on the worker node:
-$ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123.456 --master_port=1234 train.py
-(If your cluster does not have Infiniband interconnect prepend NCCL_IB_DISABLE=1)
-"""
-
 import os
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -34,24 +15,28 @@ from data.data import AutoRegressDataset, build_dataloader_AR
 from train.config import parse_args
 from train.trainer import Trainer
 import setproctitle
-setproctitle.setproctitle("Template-Test@fff")
+setproctitle.setproctitle("ClenGPT-Debug@wxc")
 
 # CUDA_VISIBLE_DEVICES=1,2,3,4 torchrun --standalone --nproc_per_node=gpu ./train/train_dd[].py 
 def ddp_setup():
-    os.environ["MASTER_ADDR"] = "localhost" # localhost for single node
-    os.environ["MASTER_PORT"] = "21667"     # Any free port
-    init_process_group(backend="nccl")      # nccl for linux, gloo for windows
+    num_cores = os.cpu_count()
+    num_threads = max(1, min(4, num_cores // 4))    # Each process uses part of the CPU cores
+    os.environ["OMP_NUM_THREADS"] = str(num_threads)
+    os.environ["MASTER_ADDR"] = "localhost"         # localhost for single node
+    os.environ["MASTER_PORT"] = "21667"             # Any free port
+    init_process_group(backend="nccl")              # nccl for linux, gloo for windows
     torch.cuda.set_device(int(os.environ.get("RANK", default='0')))
 
 def get_args_ready(WORLD_SIZE:int, RANK:int):
     ''' train a miniature character-level shakespeare model, good for debugging and playing on macbooks and such '''
     args = parse_args()
+    args.world_size = WORLD_SIZE
 
     # model setting
     args.model = 'NanoGPT'
     args.n_position = 1024
     args.n_layer = 6
-    args.n_head = 6
+    args.n_head = 4
     args.n_embd = 384
     args.n_inner = 4 * args.n_embd
     args.dropout = 0.0                          # for pretraining 0 is good, for finetuning try 0.1+
@@ -78,33 +63,39 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.eval_batch_num = 100
     args.eval_batch_size_per_gpu = 256
     args.eval_batch_size = args.eval_batch_size_per_gpu * WORLD_SIZE
-    args.clip_grad = 1.0                        # clip gradients at this value, or disable if == 0.0
     args.early_stopping_patience = 6
     args.early_stopping_delta = 0
+    args.clip_grad = 1.0                        # clip gradients at this value, or disable if == 0.0
+    args.num_workers = 4                        # dataloader workers
     
-    # IO setting
-    args.dataset = 'shakespeare_char'
-    args.wandb_project = 'Template'
-    args.exp_name = 'shakespeare-char'
-    args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
-    args.out_dir = f'{base_path}/out/{args.exp_name}'
-    args.save_strategy = 'best'                 # 'best' or 'interval'
-
-    # other setting, which are usually changed
+    # ctrl setting, which are usually changed
     args.seeds = [42, ]                         # random seeds
-    args.weight_tie = True                      # tie the word embedding and softmax weights, like in GPT-2
+    args.weight_tying = True                    # tie the word embedding and softmax weights, like in GPT-2
     args.add_bias = False                       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     args.override_opt_param_scheduler = False   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
-    args.wandb = False                          # use wandb to log training info
+    args.skip_first_eval = True                 # skip the first evaluation to at batch 0
+    args.wandb = True                           # use wandb to log training info
     args.use_early_stopping = True              # use the early stopping mechanism to aviod overfitting
     args.save_ckpt = True                       # update ckpt by save_interval and save_strategy
+    args.save_ckpt_num = 3                      # the number of ckpt to save, 0 for saving all ckpt
     args.save_snapshot = True                   # save the latest traing snapshot, from which we can resume training 
-    args.use_kvcache = True                     # use kv cache to speed up evaluation          
+    args.save_strategy = 'best'                 # 'best' or 'interval'
+    args.use_kvcache = False                    # use kv cache to speed up evaluation          
     args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
-    args.compile = torch.__version__ >= "2.0"   # use PyTorch 2.0 to compile the model to be faster
+    args.compile = False                        # compile the model to speed up training
     args.train_iters = 5000                     # total batch_num
-    args.eval_interval = 100                    # keep frequent because we'll overfit
-    args.save_interval = 100   
+    args.eval_interval = 25                     # keep frequent because we'll overfit
+    args.save_interval = 25   
+    args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
+
+    # IO setting
+    args.dataset = 'shakespeare_char'
+    args.wandb_project = 'CleanGPT'
+    args.exp_name = 'shakespeare-char'
+    args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
+    args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
+    args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
+    args.out_dir = f'{base_path}/out/{args.exp_profile}'
 
     # assert some hyper paras
     assert args.train_iters % args.batch_grad_accum_step == 0
@@ -140,15 +131,14 @@ def load_dataset(args):
     meta_path = os.path.join(f'{base_path}/data/{args.dataset}/meta.pkl')
     with open(meta_path, 'rb') as f:
         meta = pickle.load(f)
-    args.vocab_size = meta['vocab_size']
-    print(f"found vocab_size = {args.vocab_size} (inside {meta_path})")
+    args.vocab_size = meta['vocab_size'] 
 
     return dataset_dict
 
 
 if __name__ == "__main__":
     # init DDP process group
-    #ddp_setup()
+    ddp_setup()
     WORLD_SIZE = int(os.environ.get("WORLD_SIZE", default='1'))
     RANK = int(os.environ.get("RANK", default='0'))
 
@@ -177,7 +167,7 @@ if __name__ == "__main__":
         if RANK == 0:
             with wandb.init(
                 project=args.wandb_project,
-                group = args.exp_name,
+                group = args.exp_profile,
                 name = f"seed_{seed}",
                 id = trianer.wandb_id,
                 resume = 'allow',

@@ -19,7 +19,7 @@ class EarlyStopping:
             self.counter = 0        # Reset counter if validation loss improves            
         else:
             self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            print(f'EarlyStopping counter: {self.counter} out of {self.patience}\n')
             if self.counter >= self.patience:
                 self.early_stop = True
 
@@ -30,7 +30,7 @@ class OptimizerParamScheduler(object):
         self.args = args
         self.optimizer = optimizer
         self.num_steps = 0
-        self.total_step = args.train_iters
+        self.total_steps = args.train_iters
 
         # learning rate parameters
         self.lr_decay_style = args.lr_decay_style
@@ -40,24 +40,24 @@ class OptimizerParamScheduler(object):
         self.lr_min = self.lr_max/self.lr_decay_factor
         assert self.lr_decay_factor >= 1.0
         assert 0.0 <= self.lr_min <= self.lr_max
-        self.lr_warmup_steps = int(self.total_step * args.lr_warmup_ratio)
-        self.lr_decay_steps = int(self.total_step * args.lr_decay_ratio)
+        self.lr_warmup_steps = int(self.total_steps * args.lr_warmup_ratio)
+        self.lr_decay_steps = int(self.total_steps * args.lr_decay_ratio)
         assert self.lr_decay_steps >= 0
-        assert self.lr_warmup_steps + self.lr_decay_steps <= self.total_step
+        assert self.lr_warmup_steps + self.lr_decay_steps <= self.total_steps
 
         # weight decay parameters
         self.wd_decr_style = args.wd_decr_style
         self.wd_begin = float(args.wd_begin)
         self.wd_end = float(args.wd_end)
         assert 0.0 <= self.wd_end <= self.wd_begin 
-        self.wd_decr_steps = self.total_step
+        self.wd_decr_steps = self.total_steps
         
         # grad accum step parameters
         self.grad_accum_step_incr_style = args.grad_accum_step_incr_style
         self.ga_begin = int(args.ga_begin)
         self.ga_end = int(args.ga_end)
         assert 0.0 <= self.ga_begin <= self.ga_end
-        self.ga_incr_steps = self.total_step
+        self.ga_incr_steps = self.total_steps
 
     def get_wd(self):
         """Weight decay decr functions"""
@@ -138,7 +138,7 @@ class OptimizerParamScheduler(object):
 
     def state_dict(self):
         state_dict = {
-            "total_steps": self.total_step,
+            "total_steps": self.total_steps,
             "num_steps": self.num_steps,
             "lr_begin": self.lr_begin,
             "lr_max": self.lr_max,
@@ -170,12 +170,11 @@ class OptimizerParamScheduler(object):
         return sd_value
 
     def load_state_dict(self, sd):
-        # keep the training-process-ratio consistent in case of the total_step changed
-        num_steps = int(sd["num_steps"] * (self.total_step/sd["total_step"]))
+        # keep the training-process-ratio consistent in case of the total_steps changed
+        num_steps = int(sd["num_steps"] * (self.total_steps/sd["total_steps"]))
         self.step(increment=num_steps)
-        if self.rank == 0:
-            sd_num_steps = sd['num_steps']
-            print(f" > set num_steps value form {sd_num_steps} to {num_steps}")
+        if self.rank == 0 and num_steps != sd["num_steps"]:
+            print(f" > set num_steps value form {sd['num_steps']} to {num_steps}")
 
         # lr paras
         self.lr_decay_factor = self._check_and_set(self.lr_decay_factor, sd["lr_decay_factor"], "lr decay factor")

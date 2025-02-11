@@ -36,10 +36,10 @@ class CausalSelfAttention(nn.Module):
         assert config.n_embd % config.n_head == 0
         
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.add_bias)
         
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.add_bias)
         
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -48,7 +48,7 @@ class CausalSelfAttention(nn.Module):
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
-            clean_print("[NanoGPT] WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0", int(os.environ.get("LOCAL_RANK", default='0')))
+            clean_print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0", int(os.environ.get("LOCAL_RANK", default='0')), '[NanoGPT]')
             # causal mask to ensure that attention is only applied to the left in the input sequence
             bias = torch.tril(torch.ones(config.n_position, config.n_position)).view(1, 1, config.n_position, config.n_position)
             # invoke 'reigster_buffer' save tenosr 'bias' in model's state_dict, so that it can be moved to target device with the model
@@ -84,9 +84,9 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.add_bias)
         self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.add_bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -99,9 +99,9 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_1 = LayerNorm(config.n_embd, bias=config.add_bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = LayerNorm(config.n_embd, bias=config.add_bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -118,7 +118,7 @@ class NanoGPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     weight_tying: bool = True   # share token-embedding-vector between input token-embedding layer and output lm-head layer
-    bias: bool = True           # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    add_bias: bool = True       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 class NanoGPT(nn.Module):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
@@ -134,7 +134,7 @@ class NanoGPT(nn.Module):
             wpe = nn.Embedding(config.n_position, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias),
+            ln_f = LayerNorm(config.n_embd, bias=config.add_bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         if config.weight_tying:
@@ -150,9 +150,6 @@ class NanoGPT(nn.Module):
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
-
-        # report number of parameters
-        clean_print("[NanoGPT] number of parameters: %.2fM" % (self.get_num_params()/1e6,), NanoGPT.local_rank)
 
     def get_num_params(self, non_embedding=True):
         """
@@ -234,7 +231,7 @@ class NanoGPT(nn.Module):
         override_config = override_config or {} 
         assert all(k == 'dropout' for k in override_config)
         from transformers import GPT2LMHeadModel
-        clean_print(f"[NanoGPT] loading weights from pretrained gpt: {model_type}", NanoGPT.local_rank)
+        clean_print(f"loading weights from pretrained gpt: {model_type}", NanoGPT.local_rank, '[NanoGPT]')
 
         # n_layer, n_head and n_embd are determined from model_type
         config_config = {
@@ -243,14 +240,14 @@ class NanoGPT(nn.Module):
             'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
             'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
         }[model_type]
-        clean_print("[NanoGPT] forcing vocab_size=50257, n_position=1024, bias=True", NanoGPT.local_rank)
+        clean_print("forcing vocab_size=50257, n_position=1024, bias=True", NanoGPT.local_rank, '[NanoGPT]')
         config_config['vocab_size'] = 50257     # always 50257 for GPT model checkpoints
         config_config['n_position'] = 1024      # always 1024 for GPT model checkpoints
         config_config['bias'] = True            # always True for GPT model checkpoints
         
         # we can override the dropout rate, if desired
         if 'dropout' in override_config:
-            clean_print(f"[NanoGPT] overriding dropout rate to [{override_config['dropout']}]", NanoGPT.local_rank)
+            clean_print(f"overriding dropout rate to [{override_config['dropout']}]", NanoGPT.local_rank, '[NanoGPT]')
             config_config['dropout'] = override_config['dropout']
 
         # create a from-scratch initialized minGPT model
@@ -289,7 +286,7 @@ class NanoGPT(nn.Module):
 
         return model
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, args, device_type=0):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
@@ -299,19 +296,27 @@ class NanoGPT(nn.Module):
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
         optim_groups = [
-            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': decay_params, 'weight_decay': args.wd_begin},
             {'params': nodecay_params, 'weight_decay': 0.0}
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        clean_print(f"[NanoGPT] num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters", NanoGPT.local_rank)
-        clean_print(f"[NanoGPT] num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters", NanoGPT.local_rank)
+        clean_print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters", NanoGPT.local_rank, '[NanoGPT]')
+        clean_print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters", NanoGPT.local_rank, '[NanoGPT]')
+        
         # Create AdamW optimizer and use the fused version if it is available
+        # the fused version of the AdamW kernel combines multiple CUDA operations into a single kernel for execution to speed up training
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and device_type == 'cuda'
+        use_fused = fused_available and device_type != 'cpu'
         extra_config = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_config)
-        clean_print(f"[NanoGPT] using fused AdamW: {use_fused}", NanoGPT.local_rank)
+        optimizer = torch.optim.AdamW(
+            optim_groups, 
+            lr=args.lr_begin, 
+            betas=(args.adam_beta1, args.adam_beta2), 
+            eps=args.adam_eps,
+            **extra_config
+        )
+        clean_print(f"Using fused AdamW: {use_fused}", NanoGPT.local_rank, '[NanoGPT]')
 
         return optimizer
 

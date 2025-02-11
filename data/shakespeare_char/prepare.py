@@ -9,8 +9,8 @@ import pickle
 import requests
 import numpy as np
 
-os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
-os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
+# os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
+# os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
 
 # 下载 tiny shakespeare 数据集
 input_file_path = os.path.join(os.path.dirname(__file__), 'input.txt')

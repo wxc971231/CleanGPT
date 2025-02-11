@@ -6,9 +6,11 @@ sys.path.append(base_path)
 import argparse
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+import math
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from utils.utils import clean_print
+from typing import List, Tuple, Union, Optional
 
 class AutoRegressDataset(Dataset):
     def __init__(self, args:argparse.Namespace, data_path:str): 
@@ -16,49 +18,117 @@ class AutoRegressDataset(Dataset):
         self.data_path = data_path
             
     def __len__(self):
-        # 自回归模型的标签是样本后错一位，长为 n 的连续序列中共能构造出长 m 的序列样例 n-m 个
         data = np.memmap(self.data_path, dtype=np.uint16, mode='r')
         return len(data) - self.n_position
 
     def __getitem__(self, idx):
-        # 此处 Dataset 对象只返回索引，在 collate_fn 中构成 batch 数据，避免将整个数据集加载到内存中
+        # Only return data-idx here, the batch data is constructed in collate_fn
+        # by np.memmap to avoid loading the entire dataset into memory
         return idx
 
-def collate_fn(batch, data_path, n_position, device=0):
-    # np.memmap 是一种内存映射文件的方式，可在不将整个文件加载到内存中的情况下访问大文件
-    # 为每个 batch 构造新的 np.memmap 对象，以免出现内存泄漏问题 (https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122)
+def collate_fn(batch, data_path, n_position):
+    # np.memmap allows accessing large files without loading the entire file into memory
+    # Construct a new np.memmap object for each batch to avoid memory leak (https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122)
     data = np.memmap(data_path, dtype=np.uint16, mode='r')
     idxs = torch.tensor(batch)
     x = torch.stack([torch.from_numpy((data[i:i+n_position]).astype(np.int64)) for i in idxs])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+n_position]).astype(np.int64)) for i in idxs])
-    
-    if device == 'cpu':
-        x, y = x.to(device), y.to(device)
-    else:
-        # pin_memory() 将张量固定在内存中，而后可通过 DMA 通道直接传输到 GPU，避免 CPU-GPU 之间的内存拷贝
-        # non_blocking=True 允许异步传输数据，主线程不会阻塞，从而可以并行执行其他操作
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    
-    return x, y
-        
-def build_dataloader_AR(args, dataset:AutoRegressDataset, is_eval:bool=False, current_epoch:int=0, seed:int=42, device=0):
+
+    return x, y, idxs            
+
+def build_dataloader_AR(args, dataset:AutoRegressDataset, is_eval:bool=False, current_batch:int=0, seed:int=42):
     """ Buld DDP dataloader given an input dataset. """
     if dataset is None:
         return None
     
-    # The DistributedSampler automatically blocks the data and sends it to each Gpu, which can avoid data overlap
-    sampler = DistributedSampler(dataset=dataset, seed=seed)
+    batch_size_per_gpu = args.eval_batch_size_per_gpu if is_eval else args.batch_size_per_gpu
 
-    # Set the initial epoch to ensure consistent data division, especially when resuming from snapshot
-    sampler.set_epoch(current_epoch)        
-    
-    batch_size = args.eval_batch_size if is_eval else args.batch_size
+    # The DistributedSampler automatically blocks the data and sends it to each Gpu, which can avoid data overlap
+    sampler = MyDistributedSampler(
+        dataset=dataset,
+        num_replicas=int(os.environ.get("WORLD_SIZE", default='1')),
+        rank=int(os.environ.get("LOCAL_RANK", default='0')),
+        seed=seed,
+        init_batch=current_batch, 
+        batch_size_per_gpu=batch_size_per_gpu,
+        batch_num_per_iter=args.eval_batch_num if is_eval else args.eval_interval,
+        drop_last=False
+    )
+
+    # build DataLoader
     return DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=batch_size_per_gpu,
         pin_memory=True,                    # pin data in memory, which enable DMA transfer tube between CPU and GPU
         shuffle=False,                      # Must be False, as the DistributedSampler will handle the shuffling
         sampler=sampler,
         num_workers=args.num_workers,
-        collate_fn=lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position, device)
+        collate_fn=lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position)
     )
+
+class MyDistributedSampler(DistributedSampler):
+    def __init__(
+        self, dataset: Dataset, num_replicas: Optional[int] = None, 
+        rank: Optional[int] = None, shuffle: bool = True, seed: int = 0, drop_last: bool = False,
+        init_batch: int = 0, batch_size_per_gpu: int = 64, batch_num_per_iter: int = 64
+    ) -> None:
+        super().__init__(dataset, num_replicas, rank, shuffle, seed, drop_last)
+        self.shuffle = shuffle
+        self.seed = seed
+        self.batch_size = batch_size_per_gpu * num_replicas
+
+        # when self.__iter__ called, a iterator with size of macro_batch_size returned
+        self.macro_batch_size = batch_num_per_iter * self.batch_size     
+        self.macro_batch_num_per_epoch = len(dataset) // (self.macro_batch_size) if self.drop_last else math.ceil(len(dataset) / (self.macro_batch_size))
+        self.epoch_total_samples = self.macro_batch_num_per_epoch * self.macro_batch_size
+        self.batch_num_per_epoch = int(self.epoch_total_samples / self.batch_size)
+
+        # get current epoch and data offset, which is useful for resuming training
+        self.current_epoch = init_batch // self.batch_num_per_epoch
+        self.current_data_offset = self.batch_size * int(init_batch % self.batch_num_per_epoch)
+        self.init_data_offset = self.current_data_offset
+
+        # generate the sample permutation order of current epoch
+        if self.shuffle:
+            g = torch.Generator()
+            g.manual_seed(seed + self.current_epoch)
+            self.sample_idxs = torch.randperm(self.epoch_total_samples, generator=g).tolist()
+        else:
+            self.sample_idxs = list(range(self.epoch_total_samples))
+            
+    def __iter__(self):
+        # clip a segment from the permutation with size of macro_batch_size
+        indices = self.sample_idxs[self.current_data_offset : self.current_data_offset + self.macro_batch_size]
+        indices = (np.array(indices) % len(self.dataset)).tolist()  # prevent index out of range
+        assert len(indices) == self.macro_batch_size
+
+        # re-generate the sample permutation when the current epoch is finished 
+        self.current_data_offset += self.macro_batch_size
+        if self.current_data_offset >= self.epoch_total_samples:
+            self.current_data_offset = 0
+            self.current_epoch += 1
+            if self.shuffle:
+                g = torch.Generator()
+                g.manual_seed(self.seed + self.current_epoch)
+                self.sample_idxs = torch.randperm(self.epoch_total_samples, generator=g).tolist()
+        
+        # subsample
+        indices = indices[self.rank : self.macro_batch_size : self.num_replicas]
+        return iter(indices)
+
+    def __len__(self) -> int:
+        return self.macro_batch_num_per_epoch
+
+    def reset(self):
+        self.current_data_offset = self.init_data_offset
+
+    def set_batch(self, batch:int, is_train:bool) -> None:
+        if is_train:
+            # 训练集，确保每个 epoch 取数据无重叠
+            assert self.current_data_offset == self.batch_size * int(batch % self.batch_num_per_epoch)
+        else:
+            # 验证集，每 n 个训练 epoch 执行一次，每次重新随机取数据
+            g = torch.Generator()
+            g.manual_seed(self.seed + batch)
+            self.sample_idxs = torch.randperm(self.epoch_total_samples, generator=g).tolist()
+            self.current_data_offset = 0

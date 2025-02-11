@@ -29,8 +29,9 @@ def create_file_if_not_exist(file_path):
             pass
         time.sleep(1)
 
-def clean_print(str:str, rank:int=0):
+def clean_print(str:str, rank:int=0, prefix:str=''):
     if rank == 0:
+        str = prefix + '\t' + str if prefix != '' else str
         print(str)
 
 def set_seed(seed):

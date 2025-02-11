@@ -31,6 +31,10 @@ def get_parser_for_basic_args():
         help="The dataset name, which is a floder",
     )
     parser.add_argument(
+        "--num-workers", type=int, default=0, 
+        help="How many subprocesses to use for data loading in torch.utils.data.Dataloader"
+    )
+    parser.add_argument(
         "--exp-name", type=str, default=None,
         help="The short brief name of this experiment, which will be used for the group name on wandb log.",
     )
@@ -49,6 +53,10 @@ def get_parser_for_basic_args():
     parser.add_argument(
         "--save-ckpt", type=str2bool, default=True, nargs="?", const=True,     
         help="Save model checkpoint during training",
+    )
+    parser.add_argument(
+        "--save-ckpt-num", type=int, default=0, 
+        help="The number of checkpoints to save, 0 for saving all checkpoints",
     )
     parser.add_argument(
         "--save-snapshot", type=str2bool, default=True, nargs="?", const=True,     
@@ -136,7 +144,6 @@ def _add_model_args(parser):
         "--use-amp", type=str2bool, default=False,
         help="Whether to use automatic mixed precision (AMP) to speed up training.",
     )
-    group.add_argument("--fp16", type=str2bool, default=True)
 
     return parser
 
@@ -200,6 +207,11 @@ def _add_training_args(parser):
         "--log-interval", type=int, default=5,
         help="Batch interval for logging"
     )
+    group.add_argument(
+        "--skip-first-eval", type=str2bool, default=True,
+        help="Whether to skip the first evaluation at batch 0",
+    )
+    
 
     # Optimizer setting
     group.add_argument(
@@ -218,12 +230,7 @@ def _add_training_args(parser):
         "--adam-eps", type=float, default=1e-08,
         help="Term added to the denominator to improve" "numerical stability",
     )
-    group.add_argument(
-        "--optimizer", type=str, default="adamw", 
-        choices=["adam", "sgd", "adamw"],
-        help="Optimizer function",
-    )
-
+    
     return parser
 
 def _add_scheduler_args(parser):
