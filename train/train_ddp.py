@@ -15,9 +15,8 @@ from data.data import AutoRegressDataset, build_dataloader_AR
 from train.config import parse_args
 from train.trainer import Trainer
 import setproctitle
-setproctitle.setproctitle("ClenGPT-Debug@wxc")
+setproctitle.setproctitle("ClenGPT-Debug@fff")
 
-# CUDA_VISIBLE_DEVICES=1,2,3,4 torchrun --standalone --nproc_per_node=gpu ./train/train_dd[].py 
 def ddp_setup():
     num_cores = os.cpu_count()
     num_threads = max(1, min(4, num_cores // 4))    # Each process uses part of the CPU cores
@@ -89,9 +88,9 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    args.dataset = 'shakespeare_char'
+    args.exp_name = 'shakespeare_char'
     args.wandb_project = 'CleanGPT'
-    args.exp_name = 'shakespeare-char'
+    args.dataset = 'shakespeare_char'
     args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
     args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
     args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
@@ -107,16 +106,6 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
         create_folder_if_not_exist(f'{base_path}/Wandb')
     if not args.wandb:       
         os.environ['WANDB_MODE'] = 'offline'
-
-    # create floder to save ckpts and hyperparas if we need
-    if (args.save_ckpt or args.save_snapshot) and RANK == 0:
-        create_folder_if_not_exist(f'{args.out_dir}/{args.save_strategy}')
-        with open(f'{args.out_dir}/config.json', 'w') as f:
-            f.write(json.dumps(vars(args), indent=4))
-        shutil.copy2(
-            src=os.path.abspath(__file__),
-            dst=f'{args.out_dir}/train_ddp.py',
-        )
 
     return args
 
@@ -135,6 +124,19 @@ def load_dataset(args):
 
     return dataset_dict
 
+def save_setting(args):
+    if (args.save_ckpt or args.save_snapshot) and RANK == 0:
+        # create floder to save ckpts and hyperparas if we need
+        create_folder_if_not_exist(f'{args.out_dir}/{args.save_strategy}')
+        with open(f'{args.out_dir}/config.json', 'w') as f:
+            f.write(json.dumps(vars(args), indent=4))
+        
+        # save the training script
+        script_path = os.path.abspath(__file__)
+        shutil.copy2(
+            src=script_path,
+            dst=f"{args.out_dir}/{script_path[script_path.rfind('/')+1:]}",
+        )    
 
 if __name__ == "__main__":
     # init DDP process group
@@ -151,6 +153,9 @@ if __name__ == "__main__":
 
     # build training objs
     dataset_dict = load_dataset(args)
+
+    # save setting
+    save_setting(args)
 
     # train
     for seed in args.seeds:

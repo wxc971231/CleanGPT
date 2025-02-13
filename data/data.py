@@ -9,7 +9,6 @@ import torch
 import math
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from utils.utils import clean_print
 from typing import List, Tuple, Union, Optional
 
 class AutoRegressDataset(Dataset):

@@ -19,7 +19,7 @@ class EarlyStopping:
             self.counter = 0        # Reset counter if validation loss improves            
         else:
             self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}\n')
+            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
                 self.early_stop = True
 

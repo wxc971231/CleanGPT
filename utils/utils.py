@@ -34,6 +34,13 @@ def clean_print(str:str, rank:int=0, prefix:str=''):
         str = prefix + '\t' + str if prefix != '' else str
         print(str)
 
+def remove_compiled_prefix(state_dict):
+    # when using torch.compile, the model's name will be compiled to _orig_mod.xxx, which cause the state_dict can't be loaded directly.
+    for k in list(state_dict.keys()):
+        if k.startswith('_orig_mod.'):
+            state_dict[k[len('_orig_mod.'):]] = state_dict.pop(k)
+    return state_dict
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)

@@ -243,7 +243,7 @@ class NanoGPT(nn.Module):
         clean_print("forcing vocab_size=50257, n_position=1024, bias=True", NanoGPT.local_rank, '[NanoGPT]')
         config_config['vocab_size'] = 50257     # always 50257 for GPT model checkpoints
         config_config['n_position'] = 1024      # always 1024 for GPT model checkpoints
-        config_config['bias'] = True            # always True for GPT model checkpoints
+        config_config['add_bias'] = True        # always True for GPT model checkpoints
         
         # we can override the dropout rate, if desired
         if 'dropout' in override_config:

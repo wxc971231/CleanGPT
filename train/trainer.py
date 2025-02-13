@@ -18,7 +18,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Any, Dict
 from calflops import calculate_flops
 
-from utils.utils import set_seed, clean_print
+from utils.utils import set_seed, clean_print, remove_compiled_prefix
 from data.data import build_dataloader_AR
 from train.scheduler import EarlyStopping, OptimizerParamScheduler
 from model.NanoGPT import NanoGPT, NanoGPTConfig
@@ -89,13 +89,6 @@ class Trainer:
         self.raw_model = self.model.module
 
     def _init_model(self):
-        def _remove_compiled_prefix(state_dict):
-            # when using torch.compile, the model's name will be compiled to _orig_mod.xxx, which cause the state_dict can't be loaded directly.
-            for k in list(state_dict.keys()):
-                if k.startswith('_orig_mod.'):
-                    state_dict[k[len('_orig_mod.'):]] = state_dict.pop(k)
-            return state_dict
-
         # init from latest snapshot or from scratch
         if self.args.init_from is None:
             try:
@@ -103,7 +96,7 @@ class Trainer:
                 snapshot_path = f'{self.args.out_dir}/snapshot_seed{self.seed}.pt'
                 snapshot_data = torch.load(snapshot_path, map_location=f"cuda:{self.local_rank}")
                 snapshot = Snapshot(**snapshot_data)
-                self.raw_model.load_state_dict(_remove_compiled_prefix(snapshot.model_state))
+                self.raw_model.load_state_dict(remove_compiled_prefix(snapshot.model_state))
                 self.optimizer.load_state_dict(snapshot.optimizer_state)
                 self.scheduler.load_state_dict(snapshot.scheduler_state)
                 self.ga_current = self.scheduler.get_ga_step()
@@ -128,7 +121,7 @@ class Trainer:
         # init from pretrained_ckpt to finetune
         elif self.args.init_from.endswith('.pt'):
             ckpt_model_state = torch.load(self.args.init_from, map_location=f"cuda:{self.local_rank}")
-            self.raw_model.load_state_dict(_remove_compiled_prefix(ckpt_model_state))
+            self.raw_model.load_state_dict(remove_compiled_prefix(ckpt_model_state))
             clean_print(f"Pretrained model [{self.args.init_from}] loaded. Fine-tuning from scratch with grad_accum_step [{self.ga_current}]", self.local_rank, '[Trainer]')
 
         # special for NanoGPT, init from huggingface GPT2 ckpt
@@ -227,21 +220,13 @@ class Trainer:
         torch.save(asdict(snapshot), self.snapshot_path)
 
     def _save_checkpoint(self, val_loss=float('inf')):
+        ckpt_dir = None
         if self.args.save_strategy == 'interval':
             torch.save(
                 self.raw_model.state_dict(),
                 f'{self.args.out_dir}/interval/{self.seed}/{round(val_loss,3)}_seed{self.seed}_batch{self.train_batch_now}.pt'
             )
-            
-            # check the .pt files in the target path, keep only the latest n files
-            pattern = os.path.join(f'{self.args.out_dir}/interval', '*.pt')
-            ckpt_files = glob.glob(pattern)
-            ckpt_files = sorted(ckpt_files, reverse=True,
-                key=lambda x: int(os.path.basename(x).split('_')[-1].replace('batch','').replace('.pt','')),
-            )
-            for ckpt in ckpt_files[self.args.save_ckpt_num:]:
-                os.remove(ckpt)
-
+            ckpt_dir = os.path.join(f'{self.args.out_dir}/interval/{self.seed}', '*.pt')
         elif self.args.save_strategy == 'best':
             if val_loss < self.best_val_loss: 
                 self.best_val_loss = val_loss         
@@ -249,15 +234,16 @@ class Trainer:
                     self.raw_model.state_dict(),
                     f'{self.args.out_dir}/best/{round(self.best_val_loss,3)}_seed{self.seed}_batch{self.train_batch_now}.pt'
                 )
-
-                # check the .pt files in the target path, keep only the top n best files
-                pattern = os.path.join(f'{self.args.out_dir}/best', '*.pt')
-                ckpt_files = glob.glob(pattern)
-                ckpt_files = sorted(ckpt_files, key=lambda x: float(os.path.basename(x).split('_')[0]))
-                for ckpt in ckpt_files[self.args.save_ckpt_num:]:
-                    os.remove(ckpt)
+                ckpt_dir = os.path.join(f'{self.args.out_dir}/best', '*.pt')
         else:
             raise Exception(f'Unknown save strategy: {self.args.save_strategy}')
+        
+        # Only keep the best n ckpt
+        if ckpt_dir:
+            ckpt_files = glob.glob(ckpt_dir)
+            ckpt_files = sorted(ckpt_files, key=lambda x: float(os.path.basename(x).split('_')[0]))
+            for ckpt in ckpt_files[self.args.save_ckpt_num:]:
+                os.remove(ckpt)
 
     def _run_batch(self, data, is_train=False) -> float:
         with self.ctx:

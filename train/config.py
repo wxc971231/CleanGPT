@@ -19,10 +19,6 @@ def get_parser_for_basic_args():
         help="Random seed for numpy/torch"
     )
     parser.add_argument(
-        "--init-from-ckpt", type=str, default=None,
-        help="The path of pretrained checkpoint, None for training from scratch or latest snapshot",
-    )
-    parser.add_argument(
         "--out-dir", type=str, default="out",
         help="The path of output, where the checkpoints and logs will be saved.",
     )
