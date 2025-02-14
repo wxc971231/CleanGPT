@@ -29,6 +29,73 @@ CleanGPT: A training framework for GPT-style model implemented with PyTorch. Cle
     pip install -r requirements.txt
     ```
 
+## Training Example
+1. Build the dataset
+    ```shell
+    cd data/shakespeare_char
+    python prepare.py
+    ```
+2. Set hyperparameters in the `get_args_ready` method in `train/train_ddp.py`, like:
+    ```python
+    def get_args_ready(WORLD_SIZE:int, RANK:int):
+        args = parse_args()
+        args.world_size = WORLD_SIZE
+
+        # model setting
+        args.model = 'NanoGPT'
+        args.n_position = 1024
+        args.n_layer = 6
+        args.n_head = 4
+        args.n_embd = 384
+        args.n_inner = 4 * args.n_embd
+        args.dropout = 0.0                          
+        args.init_from = None                       
+
+        # optimizer setting
+        args.lr_begin = 0                                       
+        args.lr_max = 1e-3                          
+        args.lr_decay_factor = 10.0                 
+        args.lr_warmup_ratio = 0.05
+        args.lr_decay_ratio = 0.95
+        args.lr_decay_style = "cosine"
+        args.wd_begin = 1e-3                        
+        args.wd_end = args.wd_begin                 
+        args.wd_decr_style = "constant"            
+        args.ga_begin = 2                           
+        args.ga_end = args.ga_begin                 
+        args.grad_accum_step_incr_style = "constant"
+        args.adam_beta2 = 0.99                      
+        ...
+    ```
+    Detailed explanations of all hyperparameters can be found in `train/config.py`. Compared to passing parameters via command line, explicitly fixing training hyperparameters in this way is clearer and ensures reproducibility by saving the training script.
+
+3. Start training, currently only supports single-node multi-GPU parallelism. Checkpoints & Snapshots will be saved in the path `out`.
+    ```shell
+    CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=gpu ./train/train_ddp.py 
+    ```
+    Typically, we train until overfitting and early stopping is triggered.
+    ![](img/train_log.png)
+4. Evaluate the best Checkpoint. Paste the output file path generated during training into `text_autoregress.py`, it will automatically load the best Checkpoint for autoregressive generation.
+    ```text
+    Shall I compare thee to a summer's day? Thou art more lovely and more temperate:
+    My daughtks like on privily seems or a misudy.
+
+    AUTOLYCUS:
+    A missering me set good, I cannot crals him held
+    Than oak on every presently wolves and grain;
+    Then did lighten some not my father commendsmanding.
+
+    BUCKINGHAM:
+    I thank you love's frier'd, and rue my were tell erry
+    Yet die, with weapon you are!
+
+    HENRY BOLINGBROKE:
+    For me the kings of cord by my heaven
+    And precious pattle. Come, you much your grace
+    Of argue him so facewelve his sight
+    And courabled fear, my noble were before
+    ...
+    ```
 ## TODO
 - Support training with mixed datasets
 - Support llama model

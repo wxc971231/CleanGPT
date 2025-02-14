@@ -21,15 +21,84 @@ CleanGPT：一个基于PyTorch实现的[GPT](https://github.com/openai/gpt-2)类
 ## 部署指南
 1. 安装 Python 3.9 及以上版本
 2. 克隆项目
-    ```
+    ```shell
     git clone https://github.com/wxc971231/CleanGPT.git
     cd CleanGPT
     ```
 3. 安装 Pytorch：根据你的 CUDA 版本，在[官网](https://pytorch.org/get-started/previous-versions/)找到安装命令。推荐安装 Pytorch 2.0.1 及以上版本
 4. 安装依赖
-    ```
+    ```shell
     pip install -r requirements.txt
     ```
+
+## 训练示例
+1. 构造数据集
+    ```shell
+    cd data/shakespeare_char
+    python prepare.py
+    ```
+2. 在 `train/train_ddp.py` 中的 `get_args_ready` 方法中设置超参数，形如
+    ```python
+    def get_args_ready(WORLD_SIZE:int, RANK:int):
+        args = parse_args()
+        args.world_size = WORLD_SIZE
+
+        # model setting
+        args.model = 'NanoGPT'
+        args.n_position = 1024
+        args.n_layer = 6
+        args.n_head = 4
+        args.n_embd = 384
+        args.n_inner = 4 * args.n_embd
+        args.dropout = 0.0                          
+        args.init_from = None                       
+
+        # optimizer setting
+        args.lr_begin = 0                                       
+        args.lr_max = 1e-3                          
+        args.lr_decay_factor = 10.0                 
+        args.lr_warmup_ratio = 0.05
+        args.lr_decay_ratio = 0.95
+        args.lr_decay_style = "cosine"
+        args.wd_begin = 1e-3                        
+        args.wd_end = args.wd_begin                 
+        args.wd_decr_style = "constant"            
+        args.ga_begin = 2                           
+        args.ga_end = args.ga_begin                 
+        args.grad_accum_step_incr_style = "constant"
+        args.adam_beta2 = 0.99                      
+        ...
+    ```
+    所有超参数的详细解释可在 `train/config.py` 中找到。相比通过命令行传入参数，这样显式固定训练超参数更加清晰，且可通过保存训练脚本保证可复现性
+3. 启动训练，目前仅支持单机多卡并行。Checkpoint & Snapshot 将保存于 `out` 路径下
+    ```shell
+    CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=gpu ./train/train_ddp.py 
+    ```
+    通常我们会训练到过拟合，直到触发早停
+    ![](img/train_log.png)
+4. 评估最优 Checkpoint。将训练过程中生成的输出文件路径粘贴到 `eval/text_autoregress.py` 中，会自动加载最优 Checkpoint 进行自回归生成
+    
+    ```text
+    Shall I compare thee to a summer's day? Thou art more lovely and more temperate:
+    My daughtks like on privily seems or a misudy.
+
+    AUTOLYCUS:
+    A missering me set good, I cannot crals him held
+    Than oak on every presently wolves and grain;
+    Then did lighten some not my father commendsmanding.
+
+    BUCKINGHAM:
+    I thank you love's frier'd, and rue my were tell erry
+    Yet die, with weapon you are!
+
+    HENRY BOLINGBROKE:
+    For me the kings of cord by my heaven
+    And precious pattle. Come, you much your grace
+    Of argue him so facewelve his sight
+    And courabled fear, my noble were before
+    ...
+    ```
+
 
 ## TODO
 - 支持混合数据集训练
