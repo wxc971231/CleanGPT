@@ -10,8 +10,8 @@ import pickle
 import torch
 from torch.distributed import init_process_group, destroy_process_group
 
-from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist, set_seed
-from data.data import AutoRegressDataset, build_dataloader_AR
+from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist
+from data.data import AutoRegressDataset
 from train.config import parse_args
 from train.trainer import Trainer
 import setproctitle
@@ -22,7 +22,7 @@ def ddp_setup():
     num_threads = max(1, min(4, num_cores // 4))    # Each process uses part of the CPU cores
     os.environ["OMP_NUM_THREADS"] = str(num_threads)
     os.environ["MASTER_ADDR"] = "localhost"         # localhost for single node
-    os.environ["MASTER_PORT"] = "21667"             # Any free port
+    os.environ["MASTER_PORT"] = "21662"             # Any free port
     init_process_group(backend="nccl")              # nccl for linux, gloo for windows
     torch.cuda.set_device(int(os.environ.get("RANK", default='0')))
 
@@ -34,9 +34,9 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     # model setting
     args.model = 'NanoGPT'
     args.n_position = 1024
-    args.n_layer = 6
-    args.n_head = 4
-    args.n_embd = 384
+    args.n_layer = 4
+    args.n_head = 8
+    args.n_embd = 256
     args.n_inner = 4 * args.n_embd
     args.dropout = 0.0                          # for pretraining 0 is good, for finetuning try 0.1+
     args.init_from = None                       # training from scratch or resuming from latest snapshot within out-dir
@@ -59,20 +59,20 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     # training setting
     args.batch_size_per_gpu = 64                                            # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
-    args.eval_batch_num = 100
-    args.eval_batch_size_per_gpu = 256
+    args.eval_batch_num = 200
+    args.eval_batch_size_per_gpu = 64
     args.eval_batch_size = args.eval_batch_size_per_gpu * WORLD_SIZE
     args.early_stopping_patience = 6
     args.early_stopping_delta = 0
     args.clip_grad = 1.0                        # clip gradients at this value, or disable if == 0.0
-    args.num_workers = 4                        # dataloader workers
-    
+    args.num_workers = 0                        # dataloader workers
+
     # ctrl setting, which are usually changed
     args.seeds = [42, ]                         # random seeds
     args.weight_tying = True                    # tie the word embedding and softmax weights, like in GPT-2
     args.add_bias = False                       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     args.override_opt_param_scheduler = False   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
-    args.skip_first_eval = True                 # skip the first evaluation to at batch 0
+    args.skip_first_eval = False                # skip the first evaluation to at batch 0
     args.wandb = True                           # use wandb to log training info
     args.use_early_stopping = True              # use the early stopping mechanism to aviod overfitting
     args.save_ckpt = True                       # update ckpt by save_interval and save_strategy
@@ -82,15 +82,15 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.use_kvcache = False                    # use kv cache to speed up evaluation          
     args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
     args.compile = False                        # compile the model to speed up training
-    args.train_iters = 5000                     # total batch_num
-    args.eval_interval = 25                     # keep frequent because we'll overfit
-    args.save_interval = 25   
+    args.train_iters = 30000                    # total batch_num
+    args.eval_interval = 150                    # keep frequent because we'll overfit
+    args.save_interval = 150   
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    args.exp_name = 'shakespeare_char'
+    args.exp_name = 'TinyStory'
     args.wandb_project = 'CleanGPT'
-    args.dataset = 'shakespeare_char'
+    args.dataset = 'tinystory'
     args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
     args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
     args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
@@ -111,18 +111,25 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
 
 def load_dataset(args):
     # build dataset
-    dataset_train = AutoRegressDataset(args, f'{base_path}/data/{args.dataset}/train.bin')
-    dataset_val = AutoRegressDataset(args, f'{base_path}/data/{args.dataset}/val.bin')
-    dataset_test = AutoRegressDataset(args, f'{base_path}/data/{args.dataset}/test.bin')
-    dataset_dict = {'train': dataset_train, 'val': dataset_val, 'test': dataset_test}
+    dataset_dir = f'{base_path}/data/{args.dataset}'
+    dataset_train_path = f'{dataset_dir}/train.bin' if os.path.exists(f'{dataset_dir}/train.bin') else f'{dataset_dir}/train.npy'
+    dataset_val_path = f'{dataset_dir}/val.bin' if os.path.exists(f'{dataset_dir}/val.bin') else f'{dataset_dir}/val.npy'
+    dataset_train = AutoRegressDataset(args, dataset_train_path)
+    dataset_val = AutoRegressDataset(args, dataset_val_path)
+    dataset_dict = {'train': dataset_train, 'val': dataset_val}
 
     # update args.vocab_size
     meta_path = os.path.join(f'{base_path}/data/{args.dataset}/meta.pkl')
     with open(meta_path, 'rb') as f:
         meta = pickle.load(f)
-    args.vocab_size = meta['vocab_size'] 
+    if 'tokenizer' in meta:
+        tokenizer = meta['tokenizer']
+        args.vocab_size = tokenizer.vocab_size
+    else:
+        tokenizer = None
+        args.vocab_size = meta['vocab_size']
 
-    return dataset_dict
+    return dataset_dict, tokenizer
 
 def save_setting(args):
     if (args.save_ckpt or args.save_snapshot) and RANK == 0:
@@ -152,7 +159,7 @@ if __name__ == "__main__":
     args = get_args_ready(WORLD_SIZE, RANK)
 
     # build training objs
-    dataset_dict = load_dataset(args)
+    dataset_dict, tokenizer = load_dataset(args)
 
     # save setting
     save_setting(args)
@@ -166,7 +173,7 @@ if __name__ == "__main__":
         wandb_id = wandb.util.generate_id() 
         
         # build trainer
-        trianer = Trainer(args, seed, wandb_id, dataset_dict)
+        trianer = Trainer(args, seed, wandb_id, dataset_dict, tokenizer)
 
         # wandb log only on rank0
         if RANK == 0:

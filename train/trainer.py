@@ -36,11 +36,12 @@ class Snapshot:
     wandb_id: str           # for resuming wandb log
 
 class Trainer:
-    def __init__(self, args, seed, wandb_id, dataset_dict:dict):
+    def __init__(self, args, seed, wandb_id, dataset_dict, tokenizer=None):
         self.args = args
         self.seed = seed
         self.wandb_id = wandb_id
         self.dataset_dict = dataset_dict
+        self.tokenizer = tokenizer
         self.snapshot_path = f'{self.args.out_dir}/snapshot_seed{seed}.pt'
         self.world_size = int(os.environ.get("WORLD_SIZE", default='1'))
         self.local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
@@ -80,7 +81,8 @@ class Trainer:
                 'n_position', 'n_layer', 'n_head', 'n_embd', 'vocab_size', 'dropout', 'add_bias', 'weight_tying'
             ]}
             gptconf = NanoGPTConfig(**model_args)
-            self.raw_model = NanoGPT(gptconf).to(self.local_rank).train()
+            mask_out_token = self.tokenizer.pad_token_id if self.tokenizer is not None else None
+            self.raw_model = NanoGPT(gptconf, mask_out_token).to(self.local_rank).train()
         else:
             raise Exception(f'{self.args.model} is not support currently')
     
@@ -160,7 +162,7 @@ class Trainer:
         
     def _prepare_dataloader(self, dataset_dict:dict):
         dataloader_dict = {}
-        current_batch_dict = {'train': self.train_batch_now, 'val': self.val_batch_now, 'test': 0}
+        current_batch_dict = {'train': self.train_batch_now, 'val': self.val_batch_now}
         for data_type, dataset in dataset_dict.items():
             dataloader = build_dataloader_AR(
                 self.args, dataset, is_eval=(data_type!='train'), 
@@ -178,14 +180,13 @@ class Trainer:
             print(f"> Train sample all:       {train_sample_all}")
             print(f"> Train batch_size:       {train_batch_size_begin} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_begin}) ---{self.args.grad_accum_step_incr_style}---> {train_batch_size_end} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_end})")
             print(f"> Val Dataset size:       {len(dataset_dict['val'])}")
-            print(f"> Test Dataset Size:      {len(dataset_dict['test'])}")
             print(f"> Val/Eval batch_size:    {self.args.eval_batch_size} ({self.args.eval_batch_size_per_gpu}*{self.world_size})")
             print('-'*50 + '\n')
         return dataloader_dict
 
     def _check_MACs(self):
         def _get_dummy_data():
-            dataloader = build_dataloader_AR(self.args, self.dataset_dict['test'], is_eval=True)
+            dataloader = build_dataloader_AR(self.args, self.dataset_dict['val'], is_eval=True)
             dummy_data = next(dataloader.__iter__())
             dummy_data = [x.to(self.local_rank) for x in dummy_data]
             data, _ = dummy_data[:-1], dummy_data[-1]

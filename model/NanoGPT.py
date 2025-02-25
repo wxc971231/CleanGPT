@@ -67,7 +67,11 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, 
+                dropout_p=self.dropout if self.training else 0, 
+                is_causal=True
+            )
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -119,15 +123,16 @@ class NanoGPTConfig:
     dropout: float = 0.0
     weight_tying: bool = True   # share token-embedding-vector between input token-embedding layer and output lm-head layer
     add_bias: bool = True       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-
+    
 class NanoGPT(nn.Module):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
     
-    def __init__(self, config):
+    def __init__(self, config, mask_out_token=None):
         super().__init__()
         assert config.vocab_size is not None
         assert config.n_position is not None
         self.config = config
+        self.mask_out_token = mask_out_token
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
@@ -204,7 +209,14 @@ class NanoGPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            
+            if self.mask_out_token is None:
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            else:
+                # mask out loss contributions from padding tokens
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction='none')
+                mask = (targets != self.mask_out_token).float()
+                loss = (loss * mask.view(-1)).sum() / mask.sum()
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
@@ -321,12 +333,13 @@ class NanoGPT(nn.Module):
         return optimizer
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, eos_token_idx=None, temperature=1.0, top_k=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+        generated_eos = False
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at n_position
             idx_cond = idx if idx.size(1) <= self.config.n_position else idx[:, -self.config.n_position:]
@@ -345,4 +358,8 @@ class NanoGPT(nn.Module):
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
 
-        return idx
+            if idx_next.item() == eos_token_idx:
+                generated_eos = True
+                break
+
+        return idx, generated_eos

@@ -38,8 +38,12 @@ def load_model(out_path=None):
     meta_path = f"{base_path}/data/{config['dataset']}/meta.pkl"
     with open(meta_path, 'rb') as f:
         meta_data = pickle.load(f)
-        tokenizer = meta_data['stoi']
-        decoder = meta_data['itos']
+        if 'tokenizer' in meta_data:
+            tokenizer = meta_data['tokenizer']
+            decoder = None
+        else:
+            tokenizer = meta_data['stoi']
+            decoder = meta_data['itos']
 
     return model, tokenizer, decoder
     
@@ -47,23 +51,44 @@ def generate_text(model, tokenizer, decoder, prompt, max_length=50, piece_len=10
     ''' Generate text from prompt with streaming output '''
     res_str = prompt
     print(res_str, end='', flush=True)
-    while len(res_str) < max_length:
-        token_seq = torch.tensor([tokenizer[s] for s in res_str])[None,:].to(device)
-        raw_res = model.generate(token_seq, piece_len, temperature, top_k).tolist()
-        full_gen_str = ''.join([decoder[i] for i in raw_res[0]])
-        new_part = full_gen_str[len(res_str):]
-        print(new_part, end='', flush=True)
-        res_str = full_gen_str
+    if decoder is not None:
+        eos_token_idx = None
+        while len(res_str) < max_length:
+            token_seq = torch.tensor([tokenizer[s] for s in res_str])[None,:].to(device)
+            raw_res, _ = model.generate(token_seq, piece_len, eos_token_idx, temperature, top_k)
+            raw_res = raw_res.tolist()
+            full_gen_str = ''.join([decoder[i] for i in raw_res[0]])
+            new_part = full_gen_str[len(res_str):]
+            print(new_part, end='', flush=True)
+            res_str = full_gen_str
+    else:
+        eos_token_idx = tokenizer.vocab[tokenizer.eos_token]
+        while len(res_str) < max_length:
+            token_seq = tokenizer.tokenize(res_str)
+            token_seq = torch.tensor(tokenizer.convert_tokens_to_ids(token_seq))[None,:].to(device)
+            raw_res, generated_eos = model.generate(token_seq, piece_len, eos_token_idx, temperature, top_k)
+            raw_res = raw_res[0].tolist()
+            full_gen_tokens = tokenizer.convert_ids_to_tokens(raw_res)
+            full_gen_str = tokenizer.convert_tokens_to_string(full_gen_tokens)
+            new_part = full_gen_str[len(res_str):]
+            print(new_part, end='', flush=True)
+            res_str = full_gen_str
+
+            if generated_eos:
+                break
+
 
 def main():
     # setting
     device = 'cuda:0'
-    out_path = f"{base_path}/out/shakespeare-char_1024_384_4_6_compiled_ampd"
-    prompt = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate:"
+    #out_path = f"{base_path}/out/shakespeare-char_1024_384_4_6_compiled_ampd"
+    #prompt = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate:"
+    out_path = f"{base_path}/out/TinyStory_1024_256_8_4"
+    prompt = "Once upon a time, "
     temperature=1.0
     top_k=None
-    piece_len = 50
-    max_length = 1500
+    piece_len = 20
+    max_length = 5000
 
     # load model, tokenizer and decoder
     model, tokenizer, decoder = load_model(out_path)
