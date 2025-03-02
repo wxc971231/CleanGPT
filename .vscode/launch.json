@@ -9,8 +9,7 @@
             "name": "Python: torchrun",
             "type": "debugpy",
             "request": "launch",
-            //"program": "/home/tim/anaconda3/envs/project/lib/python3.8/site-packages/torch/distributed/run.py",
-            "program": "/usr/local/anaconda3/envs/torch-2.0.1-cu117-py39/lib/python3.9/site-packages/torch/distributed/run.py",
+            "program": "D:/anaconda/anaconda/envs/CleanGPT/Lib/site-packages/torch/distributed/run.py",
             "args":[
                 "--standalone",
                 // "--master_port=29500",
@@ -21,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0,"
+                "CUDA_VISIBLE_DEVICES": "0, 1"
             },
         }
     ]
