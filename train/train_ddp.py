@@ -142,7 +142,7 @@ def save_setting(args):
         script_path = os.path.abspath(__file__)
         shutil.copy2(
             src=script_path,
-            dst=f"{args.out_dir}/{script_path[script_path.rfind('/')+1:]}",
+            dst=f"{args.out_dir}/train_script.py",
         )    
 
 if __name__ == "__main__":
