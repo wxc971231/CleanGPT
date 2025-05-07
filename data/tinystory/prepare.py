@@ -12,7 +12,7 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-def tokenize_func(text_list:List[str], max_length:str=1024, data_type:str='') -> Dict[str, List]:
+def tokenize_func(tokenizer, text_list:List[str], max_length:str=1024, data_type:str='') -> Dict[str, List]:
     # batch encode without special bos_token <s>
     encoded_texts = tokenizer(text_list, add_special_tokens=False)
     input_ids_list = encoded_texts['input_ids']
@@ -55,12 +55,14 @@ if __name__ == '__main__':
     
     # tokenize the dataset
     seq_len = 1024
-    train_ids_list = tokenize_func(train_dataset['text'], seq_len, data_type='Train')
-    val_ids_list = tokenize_func(val_dataset['text'], seq_len, data_type='Val')
-    train_ids = np.array(train_ids_list, dtype=np.uint16)
-    val_ids = np.array(val_ids_list, dtype=np.uint16)
-    print(f"train_data.shape={train_ids.shape}")
-    print(f"val_data.shape={val_ids.shape}")
+    train_ids_list = tokenize_func(tokenizer, train_dataset['text'], seq_len, data_type='Train')
+    val_ids_list = tokenize_func(tokenizer, val_dataset['text'], seq_len, data_type='Val')
+    train_ids = np.array(train_ids_list, dtype=np.int64)
+    val_ids = np.array(val_ids_list, dtype=np.int64)
+    assert val_ids.max() <= tokenizer.vocab_size, f"max id {val_ids.max()} > vocab size {tokenizer.vocab_size}"
+    assert train_ids.max() <= tokenizer.vocab_size, f"max id {val_ids.max()} > vocab size {tokenizer.vocab_size}"
+    print(f"train_data.shape={train_ids.shape}, max={train_ids.max()}")
+    print(f"val_data.shape={val_ids.shape}, max={val_ids.max()}")
 
     # save the tokenized dataset
     np.save(os.path.join(os.path.dirname(__file__), 'train.npy'), train_ids)

@@ -333,7 +333,7 @@ class NanoGPT(nn.Module):
         return optimizer
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, eos_token_idx=None, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, eos_token_idx=None, temperature=1.0, top_k=None, do_sample=False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -341,25 +341,29 @@ class NanoGPT(nn.Module):
         """
         generated_eos = False
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at n_position
+            # crop sequence context at n_position 
             idx_cond = idx if idx.size(1) <= self.config.n_position else idx[:, -self.config.n_position:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
+            logits, _ = self(idx_cond)                              # (batch_size, seq_len, vocab_size)
+            logits = logits[:, -1, :] / temperature                 # (batch_size, vocab_size)
+            
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
+            
+            # either sample from the distribution or take the most likely element
+            probs = F.softmax(logits, dim=-1)                       # (batch_size, vocab_size)
+            if do_sample:
+                idx_next = torch.multinomial(probs, num_samples=1)  # (batch_size, 1)
+            else:
+                _, idx_next = torch.topk(probs, k=1, dim=-1)        # (batch_size, 1)
 
+            # exit if we hit the end of the sequence token
             if idx_next.item() == eos_token_idx:
                 generated_eos = True
                 break
+
+            # append sampled index to the running sequence and continue
+            idx = torch.cat((idx, idx_next), dim=1)
 
         return idx, generated_eos

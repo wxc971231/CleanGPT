@@ -11,11 +11,11 @@ import torch
 from torch.distributed import init_process_group, destroy_process_group
 
 from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist
-from data.data import AutoRegressDataset
+from data.data import AutoRegressDataset, AdditionDataset
 from train.config import parse_args
 from train.trainer import Trainer
 import setproctitle
-setproctitle.setproctitle("ClenGPT-Debug@fff")
+setproctitle.setproctitle("ClenGPT@Debug")
 
 def ddp_setup():
     num_cores = os.cpu_count()
@@ -41,6 +41,9 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.dropout = 0.0                          # for pretraining 0 is good, for finetuning try 0.1+
     args.init_from = None                       # training from scratch or resuming from latest snapshot within out-dir
 
+    # data setting
+    args.adder_ndigit = 2                        # digits num for adder dataset
+
     # optimizer setting
     args.lr_begin = 0                                       
     args.lr_max = 1e-3                          # with baby networks can afford to go a bit higher
@@ -51,15 +54,17 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.wd_begin = 1e-3                        # with baby networks can afford to go a bit higher (1e-4 ~ 1e-2)
     args.wd_end = args.wd_begin                 # For most of situation, keep the weight decay coefficient 'constant' is suitable
     args.wd_decr_style = "constant"            
-    args.ga_begin = 2                           # batch_grad_accum is used to simulate larger batch sizes              
+    args.ga_begin = 4                           # batch_grad_accum is used to simulate larger batch sizes              
     args.ga_end = args.ga_begin                 # with baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x
     args.grad_accum_step_incr_style = "constant"
     args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
 
     # training setting
-    args.batch_size_per_gpu = 64                                            # training batch_size (per GPU)
+    args.batch_size_per_gpu = 32                                            # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
-    args.eval_batch_num = 200
+    args.batch_num = 50 * args.ga_begin
+    args.train_iters = 200 * args.batch_num                                 # total batch_num
+    args.eval_batch_num = 20
     args.eval_batch_size_per_gpu = 64
     args.eval_batch_size = args.eval_batch_size_per_gpu * WORLD_SIZE
     args.early_stopping_patience = 6
@@ -71,9 +76,9 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.seeds = [42, ]                         # random seeds
     args.weight_tying = True                    # tie the word embedding and softmax weights, like in GPT-2
     args.add_bias = False                       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    args.override_opt_param_scheduler = False   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
+    args.override_opt_param_scheduler = True   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
     args.skip_first_eval = False                # skip the first evaluation to at batch 0
-    args.wandb = True                           # use wandb to log training info
+    args.wandb = False                           # use wandb to log training info
     args.use_early_stopping = True              # use the early stopping mechanism to aviod overfitting
     args.save_ckpt = True                       # update ckpt by save_interval and save_strategy
     args.save_ckpt_num = 3                      # the number of ckpt to save, 0 for saving all ckpt
@@ -82,21 +87,21 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.use_kvcache = False                    # use kv cache to speed up evaluation          
     args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
     args.compile = False                        # compile the model to speed up training
-    args.train_iters = 30000                    # total batch_num
-    args.eval_interval = 150                    # keep frequent because we'll overfit
-    args.save_interval = 150   
+    args.eval_interval = args.batch_num * 1     # keep frequent because we'll overfit
+    args.save_interval = args.batch_num * 1   
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    args.exp_name = 'TinyStory'
+    args.exp_name = 'ShakespeareChar'
     args.wandb_project = 'CleanGPT'
-    args.dataset = 'tinystory'
+    args.dataset = 'shakespeare_char'                      # tinystory, shakespeare_char, adder
     args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
     args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
     args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
     args.out_dir = f'{base_path}/out/{args.exp_profile}'
 
     # assert some hyper paras
+    assert args.dataset in ['tinystory', 'shakespeare_char', 'adder'], f"dataset {args.dataset} not supported"
     assert args.train_iters % args.batch_grad_accum_step == 0
     assert args.train_iters % args.eval_interval == 0
     assert args.train_iters % args.save_interval == 0
@@ -110,25 +115,32 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     return args
 
 def load_dataset(args):
-    # build dataset
-    dataset_dir = f'{base_path}/data/{args.dataset}'
-    dataset_train_path = f'{dataset_dir}/train.bin' if os.path.exists(f'{dataset_dir}/train.bin') else f'{dataset_dir}/train.npy'
-    dataset_val_path = f'{dataset_dir}/val.bin' if os.path.exists(f'{dataset_dir}/val.bin') else f'{dataset_dir}/val.npy'
-    dataset_train = AutoRegressDataset(args, dataset_train_path)
-    dataset_val = AutoRegressDataset(args, dataset_val_path)
-    dataset_dict = {'train': dataset_train, 'val': dataset_val}
-
-    # update args.vocab_size
-    meta_path = os.path.join(f'{base_path}/data/{args.dataset}/meta.pkl')
-    with open(meta_path, 'rb') as f:
-        meta = pickle.load(f)
-    if 'tokenizer' in meta:
-        tokenizer = meta['tokenizer']
-        args.vocab_size = tokenizer.vocab_size
-    else:
+    if args.dataset == 'tinystory':
+        dataset_train = AutoRegressDataset(args, f'{base_path}/data/tinystory/train.npy')
+        dataset_val = AutoRegressDataset(args, f'{base_path}/data/tinystory/val.npy')
+        dataset_test = None
+        with open(os.path.join(f'{base_path}/data/{args.dataset}/meta.pkl'), 'rb') as f:
+            meta = pickle.load(f)
+            tokenizer = meta['tokenizer']
+            args.vocab_size = tokenizer.vocab_size
+    elif args.dataset == 'shakespeare_char':
+        dataset_train = AutoRegressDataset(args, f'{base_path}/data/shakespeare_char/train.npy')
+        dataset_val = AutoRegressDataset(args, f'{base_path}/data/shakespeare_char/val.npy')
+        dataset_test = None
+        with open(os.path.join(f'{base_path}/data/{args.dataset}/meta.pkl'), 'rb') as f:
+            meta = pickle.load(f)
+            tokenizer = None
+            args.vocab_size = meta['vocab_size']
+    elif args.dataset == 'adder':
+        dataset_train = AdditionDataset(args.adder_ndigit, 'train')
+        dataset_val = AdditionDataset(args.adder_ndigit, 'val')
+        dataset_test = AdditionDataset(args.adder_ndigit, 'test')
         tokenizer = None
-        args.vocab_size = meta['vocab_size']
-
+        args.vocab_size = dataset_train.get_vocab_size()
+    else:
+        raise ValueError(f"dataset {args.dataset} not supported")
+    
+    dataset_dict = {'train': dataset_train, 'val': dataset_val, 'test': dataset_test}
     return dataset_dict, tokenizer
 
 def save_setting(args):

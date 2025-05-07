@@ -52,12 +52,12 @@ print(f"val has {len(val_ids):,} tokens")
 print(f"test has {len(test_data):,} tokens")
 
 # 导出为二进制文件 .bin
-train_ids = np.array(train_ids, dtype=np.uint16)
-val_ids = np.array(val_ids, dtype=np.uint16)
-test_ids = np.array(test_data, dtype=np.uint16)
-train_ids.tofile(os.path.join(os.path.dirname(__file__), 'train.bin'))
-val_ids.tofile(os.path.join(os.path.dirname(__file__), 'val.bin'))
-test_ids.tofile(os.path.join(os.path.dirname(__file__), 'test.bin'))
+train_ids = np.array(train_ids, dtype=np.int64)
+val_ids = np.array(val_ids, dtype=np.int64)
+test_ids = np.array(test_data, dtype=np.int64)
+np.save(os.path.join(os.path.dirname(__file__), 'train.npy'), train_ids)
+np.save(os.path.join(os.path.dirname(__file__), 'val.npy'), val_ids)
+np.save(os.path.join(os.path.dirname(__file__), 'test.npy'), test_ids)
 
 # 保存 meta information，之后用于编码/解码
 meta = {

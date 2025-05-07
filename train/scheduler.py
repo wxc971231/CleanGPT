@@ -199,6 +199,8 @@ class OptimizerParamScheduler(object):
             self.ga_incr_steps = self._check_and_set(self.ga_incr_steps, sd["ga_incr_steps"], "total number of grad incr iterations",)
             self.grad_accum_step_incr_style = self._check_and_set(self.grad_accum_step_incr_style, sd["grad_accum_step_incr_style"], "grad accum step incr style")
 
+        return self.total_steps/sd["total_steps"]
+    
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     class Args:

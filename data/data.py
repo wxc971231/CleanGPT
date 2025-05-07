@@ -10,6 +10,7 @@ import math
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import List, Tuple, Union, Optional
+from data.adder.prepare import AdditionDataset
 
 class AutoRegressDataset(Dataset):
     def __init__(self, args:argparse.Namespace, data_path:str): 
@@ -17,7 +18,7 @@ class AutoRegressDataset(Dataset):
         self.data_path = data_path
             
     def __len__(self):
-        data = np.memmap(self.data_path, dtype=np.uint16, mode='r')
+        data = np.load(self.data_path, mmap_mode='r', allow_pickle=True)
         return len(data) - self.n_position
 
     def __getitem__(self, idx):
@@ -28,14 +29,20 @@ class AutoRegressDataset(Dataset):
 def collate_fn(batch, data_path, n_position):
     # np.memmap allows accessing large files without loading the entire file into memory
     # Construct a new np.memmap object for each batch to avoid memory leak (https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122)
-    data = np.memmap(data_path, dtype=np.uint16, mode='r')
+    data = np.load(data_path, mmap_mode='r')
     idxs = torch.tensor(batch)
-    x = torch.stack([torch.from_numpy((data[i:i+n_position]).astype(np.int64)) for i in idxs])
-    y = torch.stack([torch.from_numpy((data[i+1:i+1+n_position]).astype(np.int64)) for i in idxs])
+    if data.ndim == 1:
+        x = torch.stack([torch.from_numpy((data[i:i+n_position]).astype(np.int64)) for i in idxs])
+        y = torch.stack([torch.from_numpy((data[i+1:i+1+n_position]).astype(np.int64)) for i in idxs])
+    elif data.ndim == 2:
+        x = torch.stack([torch.from_numpy((data[i,:-1]).astype(np.int64)) for i in idxs])
+        y = torch.stack([torch.from_numpy((data[i,1:]).astype(np.int64)) for i in idxs])
+    else:
+        raise ValueError(f"data shape {data.shape} not supported")
 
     return x, y, idxs            
 
-def build_dataloader_AR(args, dataset:AutoRegressDataset, is_eval:bool=False, current_batch:int=0, seed:int=42):
+def build_dataloader(args, dataset:AutoRegressDataset, is_eval:bool=False, current_batch:int=0, seed:int=42):
     """ Buld DDP dataloader given an input dataset. """
     if dataset is None:
         return None
@@ -54,6 +61,13 @@ def build_dataloader_AR(args, dataset:AutoRegressDataset, is_eval:bool=False, cu
         drop_last=False
     )
 
+    if args.dataset in ['tinystory', 'shakespeare_char']:
+        collate_func = lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position)
+    elif args.dataset == 'adder':
+        collate_func = None
+    else:
+        raise ValueError(f"dataset {args.dataset} not supported")
+
     # build DataLoader
     return DataLoader(
         dataset,
@@ -62,7 +76,7 @@ def build_dataloader_AR(args, dataset:AutoRegressDataset, is_eval:bool=False, cu
         shuffle=False,                      # Must be False, as the DistributedSampler will handle the shuffling
         sampler=sampler,
         num_workers=args.num_workers,
-        collate_fn=lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position)
+        collate_fn=collate_func
     )
 
 class MyDistributedSampler(DistributedSampler):
@@ -121,13 +135,13 @@ class MyDistributedSampler(DistributedSampler):
     def reset(self):
         self.current_data_offset = self.init_data_offset
 
-    def set_batch(self, batch:int, is_train:bool) -> None:
+    def set_batch(self, batch:int, macro_batch_now:int, is_train:bool) -> None:
         if is_train:
             # 训练集，确保每个 epoch 取数据无重叠
             assert self.current_data_offset == self.batch_size * int(batch % self.batch_num_per_epoch)
         else:
             # 验证集，每 n 个训练 epoch 执行一次，每次重新随机取数据
             g = torch.Generator()
-            g.manual_seed(self.seed + batch)
+            g.manual_seed(self.seed + macro_batch_now)
             self.sample_idxs = torch.randperm(self.epoch_total_samples, generator=g).tolist()
             self.current_data_offset = 0

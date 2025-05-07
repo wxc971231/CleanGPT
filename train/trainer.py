@@ -19,7 +19,7 @@ from typing import Any, Dict
 from calflops import calculate_flops
 
 from utils.utils import set_seed, clean_print, remove_compiled_prefix
-from data.data import build_dataloader_AR
+from data.data import build_dataloader
 from train.scheduler import EarlyStopping, OptimizerParamScheduler
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 
@@ -28,12 +28,11 @@ class Snapshot:
     model_state: 'OrderedDict[str, torch.Tensor]'
     optimizer_state: Dict[str, Any]
     scheduler_state: Dict[str, Any]
-    total_steps: int         # for scheduler initialization
-    trained_time: float     # for total training time
-    latest_train_batch: int # for consistent optimizer-para schedule
-    latest_val_batch: int   # for consistent visit val_dataset
-    best_val_loss: float    # for early_stopping
-    wandb_id: str           # for resuming wandb log
+    total_steps: int            # for scheduler initialization
+    trained_time: float         # for total training time
+    latest_batch: Dict[int, Any]# for consistent optimizer-para schedule
+    best_val_loss: float        # for early_stopping
+    wandb_id: str               # for resuming wandb log
 
 class Trainer:
     def __init__(self, args, seed, wandb_id, dataset_dict, tokenizer=None):
@@ -50,8 +49,7 @@ class Trainer:
         self.ga_current = self.args.ga_begin
         self.best_val_loss = float('inf')
         self.batch_start = 0
-        self.train_batch_now = 0
-        self.val_batch_now = 0
+        self.batch_now = {'train': 0, 'val': 0, 'test': 0}
         self.trained_time = 0
         self.grad_batch_cnt = 1
 
@@ -100,22 +98,19 @@ class Trainer:
                 snapshot = Snapshot(**snapshot_data)
                 self.raw_model.load_state_dict(remove_compiled_prefix(snapshot.model_state))
                 self.optimizer.load_state_dict(snapshot.optimizer_state)
-                self.scheduler.load_state_dict(snapshot.scheduler_state)
+                batch_factor = self.scheduler.load_state_dict(snapshot.scheduler_state)
                 self.ga_current = self.scheduler.get_ga_step()
                 self.best_val_loss = snapshot.best_val_loss
-                self.batch_start = snapshot.latest_train_batch  
-                self.train_batch_now = snapshot.latest_train_batch
-                self.val_batch_now = snapshot.latest_val_batch
+                self.batch_start = self.batch_now = {k: int(v * batch_factor) for k, v in snapshot.latest_batch.items()}
                 self.wandb_id = snapshot.wandb_id
                 self.trained_time = snapshot.trained_time
-                clean_print(f"Resuming training from snapshot at Batch [{self.train_batch_now}] with grad_accum_step [{self.ga_current}]", self.local_rank, '[Trainer]')
+                macro_batch_now = self.batch_now['train'] // self.args.batch_num
+                clean_print(f"Resuming training from snapshot at macro_batch {macro_batch_now}({self.batch_now['train']}) with grad_accum_step [{self.ga_current}]", self.local_rank, '[Trainer]')
 
             except FileNotFoundError:    
                 # if no snapshot found, start from scratch
                 self.best_val_loss = float('inf')
-                self.batch_start = 0
-                self.train_batch_now = 0
-                self.val_batch_now = 0
+                self.batch_start = self.batch_now = {'train': 0, 'val': 0, 'test': 0}
                 self.ga_current = self.args.ga_begin
                 self.trained_time = 0
                 clean_print(f"Snapshot not found. Training model from scratch with grad_accum_step={self.ga_current}", self.local_rank, '[Trainer]')
@@ -154,20 +149,20 @@ class Trainer:
             print('\n' + '-'*20 + 'Model Info' + '-'*20)
             print(f'> Model Type:           {self.args.model}')
             print(f"> Total model params:   {params/1e6:.2f} M")
-            print(f'> MACs per eval batch:  {macs*self.world_size/1e9:.2f} G')
-            print(f'> Flops per eval batch: {flops*self.world_size/1e9:.2f} G')
+            print(f'> MACs per val batch:   {macs*self.world_size/1e9:.2f} G')
+            print(f'> Flops per val batch:  {flops*self.world_size/1e9:.2f} G')
             print(f'> Using kv-cache:       {self.args.use_kvcache}')
             print(f'> Using torch.compile:  {self.args.compile}')
             print('-'*50 + '\n')
         
     def _prepare_dataloader(self, dataset_dict:dict):
         dataloader_dict = {}
-        current_batch_dict = {'train': self.train_batch_now, 'val': self.val_batch_now}
-        for data_type, dataset in dataset_dict.items():
-            dataloader = build_dataloader_AR(
-                self.args, dataset, is_eval=(data_type!='train'), 
-                current_batch=current_batch_dict[data_type], seed=self.seed
-            )
+        for data_type, dataset in dataset_dict.items():            
+            dataloader = None if dataset is None else \
+                build_dataloader(
+                    self.args, dataset, is_eval=(data_type!='train'), 
+                    current_batch=self.batch_now[data_type], seed=self.seed
+                )
             dataloader_dict[data_type] = dataloader
 
         train_batch_size_begin = self.args.batch_size_per_gpu * self.world_size * self.args.ga_begin
@@ -186,7 +181,7 @@ class Trainer:
 
     def _check_MACs(self):
         def _get_dummy_data():
-            dataloader = build_dataloader_AR(self.args, self.dataset_dict['val'], is_eval=True)
+            dataloader = build_dataloader(self.args, self.dataset_dict['val'], is_eval=True)
             dummy_data = next(dataloader.__iter__())
             dummy_data = [x.to(self.local_rank) for x in dummy_data]
             data, _ = dummy_data[:-1], dummy_data[-1]
@@ -213,8 +208,7 @@ class Trainer:
             scheduler_state=self.scheduler.state_dict(),
             total_steps=self.args.train_iters,
             trained_time=self.trained_time,
-            latest_train_batch=self.train_batch_now,
-            latest_val_batch=self.val_batch_now,
+            latest_batch=self.batch_now.copy(),
             best_val_loss=self.best_val_loss,
             wandb_id=self.wandb_id
         )
@@ -222,10 +216,11 @@ class Trainer:
 
     def _save_checkpoint(self, val_loss=float('inf')):
         ckpt_dir = None
+        macro_batch_now = self.batch_now['train'] // self.args.batch_num
         if self.args.save_strategy == 'interval':
             torch.save(
                 self.raw_model.state_dict(),
-                f'{self.args.out_dir}/interval/{self.seed}/{round(val_loss,3)}_seed{self.seed}_batch{self.train_batch_now}.pt'
+                f"{self.args.out_dir}/interval/{self.seed}/{round(val_loss,3)}_seed{self.seed}_mb{macro_batch_now}.pt"
             )
             ckpt_dir = os.path.join(f'{self.args.out_dir}/interval/{self.seed}', '*.pt')
         elif self.args.save_strategy == 'best':
@@ -233,7 +228,7 @@ class Trainer:
                 self.best_val_loss = val_loss         
                 torch.save(
                     self.raw_model.state_dict(),
-                    f'{self.args.out_dir}/best/{round(self.best_val_loss,3)}_seed{self.seed}_batch{self.train_batch_now}.pt'
+                    f"{self.args.out_dir}/best/{round(self.best_val_loss,3)}_seed{self.seed}_mb{macro_batch_now}.pt"
                 )
                 ckpt_dir = os.path.join(f'{self.args.out_dir}/best', '*.pt')
         else:
@@ -248,7 +243,7 @@ class Trainer:
 
     def _run_batch(self, data, is_train=False) -> float:
         with self.ctx:
-            logits, loss = self.model(*tuple(data))
+            _, loss = self.model(*tuple(data))
         
         new_lr = new_wd = grad_norm = None
         if is_train:
@@ -283,22 +278,23 @@ class Trainer:
 
         return loss.item(), grad_norm, new_lr, new_wd
 
-    def _run_batches(self, is_train=False):
+    def _run_macro_batch(self, is_train=False):
+        macro_batch_now = self.batch_now['train'] // self.args.batch_num
         if is_train:
             total = self.args.eval_interval
-            desc = f'[GPU{self.local_rank}]: Trianing batch {self.train_batch_now} - {self.train_batch_now + self.args.eval_interval}'
+            desc = f"[GPU0-{self.world_size-1}]: Trianing batch {macro_batch_now}({self.batch_now['train']}-{self.batch_now['train'] + self.args.batch_num})"
             dataloader = self.dataloader_dict['train']
-            dataloader.sampler.set_batch(self.train_batch_now, True)     
+            dataloader.sampler.set_batch(self.batch_now['train'], macro_batch_now, True)     
         else:
             total = self.args.eval_batch_num
-            desc = f'[GPU{self.local_rank}]: Calculating eval loss'
+            desc = f'[GPU0-{self.world_size-1}]: Calculating val_loss'
             dataloader = self.dataloader_dict['val']
-            dataloader.sampler.set_batch(self.val_batch_now, False)     
+            dataloader.sampler.set_batch(self.batch_now['val'], macro_batch_now, False)     
 
         self.optimizer.zero_grad()        
         losses, visited_data = [], []
         new_lr = new_wd = grad_norm = 0
-        with tqdm(total=total, desc=desc, position=self.local_rank) as pbar:
+        with tqdm(total=total, desc=desc, position=self.local_rank, disable=self.local_rank!=0) as pbar:
             for i, batch in enumerate(dataloader):
                 batch = [x.to(self.local_rank) for x in batch]
                 data, dataset_idxs = batch[:-1], batch[-1]
@@ -325,8 +321,8 @@ class Trainer:
                 if i == total - 1:
                     break
         
-        if is_train: self.train_batch_now += total
-        else: self.val_batch_now += total
+        if is_train: self.batch_now['train'] += total
+        else: self.batch_now['val'] += total
 
         batches_loss = np.array(losses).mean()
         return batches_loss, new_lr, new_wd, grad_norm, batch_token, visited_data
@@ -337,8 +333,8 @@ class Trainer:
             dataset_visited_cnt = np.zeros(len(self.dataset_dict['train']), dtype=np.int8)
 
         # start training
-        for batch in range(self.batch_start, self.args.train_iters + 1, self.args.eval_interval):  
-            self.train_batch_now = batch
+        for batch in range(self.batch_start['train'], self.args.train_iters + 1, self.args.eval_interval):  
+            self.batch_now['train'] = batch
             wandb_log_dict = {}
 
             # Save snapshot before the batch training process, avoid overlap when resuming from the snapshot
@@ -349,7 +345,7 @@ class Trainer:
             if (batch % self.args.eval_interval == 0 or batch == self.args.train_iters) and (batch != 0 or not self.args.skip_first_eval):
                 self.model.eval()
                 with torch.no_grad():
-                    val_loss, _, _, _, _, _ = self._run_batches(is_train=False)
+                    val_loss, _, _, _, _, _ = self._run_macro_batch(is_train=False)
                     wandb_log_dict.update({"losses/val_loss": val_loss})                    
 
             # exit point
@@ -359,7 +355,7 @@ class Trainer:
             # training process
             self.model.train()
             start_time = time.time()
-            train_loss, new_lr, new_wd, grad_norm, batch_token, visited_data = self._run_batches(is_train=True)
+            train_loss, new_lr, new_wd, grad_norm, batch_token, visited_data = self._run_macro_batch(is_train=True)
             self.trained_time += time.time() - start_time
 
             wandb_log_dict.update({
