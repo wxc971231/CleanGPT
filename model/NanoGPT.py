@@ -194,21 +194,21 @@ class NanoGPT(nn.Module):
 
     def forward(self, idx, targets=None):
         device = idx.device
-        b, t = idx.size()
+        b, t = idx.size()                                           # (batch_size, seq_len)
         assert t <= self.config.n_position, f"Cannot forward sequence of length {t}, block size is only {self.config.n_position}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
+        pos = torch.arange(0, t, dtype=torch.long, device=device)   # (seq_len, )
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        tok_emb = self.transformer.wte(idx)             # (batch_size, seq_len, n_embd)
+        pos_emb = self.transformer.wpe(pos)             # (seq_len, n_embd)
+        x = self.transformer.drop(tok_emb + pos_emb)    # (batch_size, seq_len, n_embd)
         for block in self.transformer.h:
-            x = block(x)
-        x = self.transformer.ln_f(x)
+            x = block(x)                                
+        x = self.transformer.ln_f(x)                    # (batch_size, seq_len, n_embd)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
+            logits = self.lm_head(x)                    # (batch_size, seq_len)
             
             if self.mask_out_token is None:
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
@@ -359,7 +359,7 @@ class NanoGPT(nn.Module):
                 _, idx_next = torch.topk(probs, k=1, dim=-1)        # (batch_size, 1)
 
             # exit if we hit the end of the sequence token
-            if idx_next.item() == eos_token_idx:
+            if eos_token_idx is not None and idx_next.item() == eos_token_idx:
                 generated_eos = True
                 break
 

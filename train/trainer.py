@@ -18,10 +18,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Any, Dict
 from calflops import calculate_flops
 
-from utils.utils import set_seed, clean_print, remove_compiled_prefix
 from data.data import build_dataloader
 from train.scheduler import EarlyStopping, OptimizerParamScheduler
 from model.NanoGPT import NanoGPT, NanoGPTConfig
+from utils.utils_model import remove_compiled_prefix
+from utils.utils import set_seed, clean_print
+from eval.eval_score import eval_score_adder
 
 @dataclass
 class Snapshot:
@@ -72,6 +74,14 @@ class Trainer:
         else:
             self.ctx = nullcontext()                                                    # null context
             self.scaler = torch.cuda.amp.GradScaler(enabled=False)                      # no-op
+
+        # eval setting
+        self.eval_setting = {}
+        if self.args.dataset == 'adder':
+            self.eval_setting = {
+                'greedy': lambda: self._eval_score(sample=False),
+                # 'sample': lambda: self._eval_score(sample=True),
+            }
 
     def _build_model(self):
         if self.args.model == 'NanoGPT':
@@ -298,7 +308,8 @@ class Trainer:
             for i, batch in enumerate(dataloader):
                 batch = [x.to(self.local_rank) for x in batch]
                 data, dataset_idxs = batch[:-1], batch[-1]
-                visited_data.append(dataset_idxs)
+                if is_train:
+                    visited_data.append(dataset_idxs % len(self.dataset_dict['train']))
 
                 # run batch
                 loss, norm, lr, wd = self._run_batch(data, is_train)
@@ -327,6 +338,19 @@ class Trainer:
         batches_loss = np.array(losses).mean()
         return batches_loss, new_lr, new_wd, grad_norm, batch_token, visited_data
 
+    def _eval_score(self, sample=False):
+        desc_sample = f'sample{self.args.resample_times}' if sample else 'greedy'
+        desc = f'Evaluating on {self.args.dataset}({desc_sample})'
+        problem_dataloader = self.dataloader_dict['test']
+        total = self.args.problem_batch_num * self.args.problem_batch_size_per_gpu
+        
+        if self.args.dataset == 'adder':
+            assert sample == False, "Sample mode is not supported for adder dataset"
+            correct_rate = eval_score_adder(self.raw_model, self.tokenizer, problem_dataloader, total, desc)
+            return correct_rate
+        else:
+            raise Exception(f"Unknown dataset: {self.args.dataset}")
+
     def train(self):    
         early_stop_signal = torch.tensor([0,]).to(self.local_rank)
         if self.local_rank == 0:
@@ -346,7 +370,18 @@ class Trainer:
                 self.model.eval()
                 with torch.no_grad():
                     val_loss, _, _, _, _, _ = self._run_macro_batch(is_train=False)
-                    wandb_log_dict.update({"losses/val_loss": val_loss})                    
+                    wandb_log_dict.update({f"{self.args.dataset}/val_loss": val_loss})                    
+
+            # Evaluate policy performance at specified batch intervals
+            if (batch % self.args.eval_score_interval == 0 or batch == self.args.train_iters) and (batch != 0 or not self.args.skip_first_eval):
+                self.model.eval()
+                with torch.inference_mode():  
+                    for setting, eval_func in self.eval_setting.items():
+                        if self.args.dataset == 'adder':
+                            correct_rate = eval_func()
+                            wandb_log_dict.update({f'{self.args.dataset}/correct_rate({setting})': correct_rate})
+                        else:
+                            raise Exception(f"Unknown dataset: {self.args.dataset}")
 
             # exit point
             if batch == self.args.train_iters:
@@ -359,13 +394,13 @@ class Trainer:
             self.trained_time += time.time() - start_time
 
             wandb_log_dict.update({
-                "info/batch": batch,
-                'info/lr': new_lr,
-                'info/wd': new_wd,
-                'info/grad_norm': grad_norm,
-                'info/batch_token': batch_token,
-                "losses/train_loss": train_loss, 
-                'info/trained_time': self.trained_time,
+                f"{self.args.dataset}/batch": batch,
+                f'{self.args.dataset}/lr': new_lr,
+                f'{self.args.dataset}/wd': new_wd,
+                f'{self.args.dataset}/grad_norm': grad_norm,
+                f'{self.args.dataset}/batch_token': batch_token,
+                f'{self.args.dataset}/train_loss': train_loss, 
+                f'{self.args.dataset}/trained_time': self.trained_time,
             })    
 
             # gather trainig info from all GPU
@@ -390,7 +425,7 @@ class Trainer:
                     wandb_log_dict[key] = log_value_tensor[i].item()
 
                     # early-stopping and save-ckpt by val_loss 
-                    if key == "losses/val_loss":
+                    if key == f'{self.args.dataset}/val_loss':
                         val_loss = wandb_log_dict[key]
                         self.early_stopping(val_loss)
                         if self.args.save_ckpt and ((self.args.save_strategy == 'best' and batch != 0) or (self.args.save_strategy == 'interval' and batch % self.args.save_interval == 0)):
@@ -398,8 +433,8 @@ class Trainer:
 
                 # update dataset visited info
                 visited_part = dataset_visited_cnt[dataset_visited_cnt!=0]
-                wandb_log_dict.update({f'info/visited_ratio': len(visited_part)/len(dataset_visited_cnt)})   
-                wandb.run.summary[f"info/visited_times"] = np.mean(visited_part)
+                wandb_log_dict.update({f'{self.args.dataset}/visited_ratio': len(visited_part)/len(dataset_visited_cnt)})   
+                wandb.run.summary[f"{self.args.dataset}/visited_times"] = np.mean(visited_part)
                 wandb.log(wandb_log_dict)
                 #print(len(visited_part)/len(dataset_visited_cnt), np.mean(visited_part))
 

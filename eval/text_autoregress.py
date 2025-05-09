@@ -3,55 +3,9 @@ import os
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__),'..'))
 sys.path.append(base_path)
 
-import glob
-import pickle
-import json
 import torch
-from model.NanoGPT import NanoGPT, NanoGPTConfig
-from utils.utils import remove_compiled_prefix
+from utils.utils_model import load_model
 
-def load_model(out_path=None):
-    """ load trained model from out_path """
-    # load training config
-    config = json.load(open(f"{out_path}/config.json", "r"))
-
-    # create model
-    if config['model'] == 'NanoGPT':
-        model_args = {k: config[k] for k in ['n_position', 'n_layer', 'n_head', 'n_embd', 'vocab_size', 'dropout', 'add_bias', 'weight_tying']}
-        gptconf = NanoGPTConfig(**model_args)
-        model = NanoGPT(gptconf)
-    else:
-        raise Exception(f"{config['model']} is not support currently")
-
-    # load best checkpoint
-    ckpt_dir = os.path.join(f'{out_path}/best', '*.pt') if config['save_strategy'] == 'best' else \
-                os.path.join(f"{out_path}/interval/{config['seed'][0]}", '*.pt')
-    ckpt_files = glob.glob(ckpt_dir)
-    ckpt_files = sorted(ckpt_files, key=lambda x: float(os.path.basename(x).split('_')[0]))
-    best_ckpt_path = ckpt_files[0]
-    ckpt_model_state = torch.load(best_ckpt_path, map_location=f"cuda:0")
-    model.load_state_dict(remove_compiled_prefix(ckpt_model_state))
-
-    # load tokenizer & decoder
-    dataset_name = config['dataset']
-    meta_path = f"{base_path}/data/{dataset_name}/meta.pkl"
-    if dataset_name == 'tinystory':
-        with open(meta_path, 'rb') as f:
-            meta_data = pickle.load(f)
-            tokenizer = meta_data['tokenizer']
-            decoder = None
-    elif dataset_name == 'shakespeare_char':
-        with open(meta_path, 'rb') as f:
-            meta_data = pickle.load(f)
-            tokenizer = meta_data['stoi']
-            decoder = meta_data['itos']
-    elif dataset_name == 'adder':
-        pass
-    else:
-        raise Exception(f"{dataset_name} is not support currently")
-    
-    return model, dataset_name, tokenizer, decoder
-    
 def generate_text(model, dataset_name, tokenizer, decoder, prompt, max_length=50, piece_len=100, temperature=1.0, top_k=None, device='cuda:0', do_sample=False):
     ''' Generate text from prompt with streaming output '''
     res_str = prompt
@@ -92,13 +46,19 @@ def main():
     device = 'cuda:0'
     out_path = f"{base_path}/out/ShakespeareChar_1024_256_8_4"
     prompt = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate:"
+    temperature = 0.02
+    top_k = None
+    do_sample = True
+    piece_len = 20
+    max_length = 1000
+
     # out_path = f"{base_path}/out/TinyStory_1024_256_8_4"
     # prompt = "Once upon a time, "
     temperature = 0.1
     top_k = None
     do_sample = False
     piece_len = 20
-    max_length = 5000
+    max_length = 1000
 
     # load model, tokenizer and decoder
     model, dataset_name, tokenizer, decoder = load_model(out_path)

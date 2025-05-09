@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from torch.utils.data import Dataset
 
 class AdditionDataset(Dataset):
@@ -38,8 +37,8 @@ class AdditionDataset(Dataset):
         rng = torch.Generator()
         rng.manual_seed(1337)
         perm = torch.randperm(num, generator=rng)
-        num_test = min(int(num*0.2), 500)   # 20% of the whole dataset, or only up to 500
-        num_val = min(int(num*0.2), 1000)   # 20% of the whole dataset, or only up to 1000
+        num_test = min(int(num*0.2), 500)  # 20% of the whole dataset, or only up to 500
+        num_val = min(int(num*0.2), 500)   # 20% of the whole dataset, or only up to 1000
         if split == 'train':
             self.ixes = perm[num_test+num_val:]
         elif split == 'val':
@@ -48,6 +47,8 @@ class AdditionDataset(Dataset):
             self.ixes = perm[:num_test]
         else:
             raise ValueError(f"Unknown split: {split}")
+
+        self.length = len(self.ixes)
 
     def get_vocab_size(self):
         return 10 # digits 0..9
@@ -59,10 +60,11 @@ class AdditionDataset(Dataset):
         return 3*self.ndigit + 1 - 1
 
     def __len__(self):
-        return self.ixes.nelement()
+        return self.length
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx):        
         # given a problem index idx, first recover the associated a + b
+        idx = idx % self.length
         idx = self.ixes[idx].item()
         nd = 10**self.ndigit
         a = idx // nd
@@ -86,24 +88,34 @@ class AdditionDataset(Dataset):
         y[:self.ndigit*2-1] = -1 
         return x, y, idx
 
-def decoder(d1d2, d1d2d3, ndigit):
-    results = []
-    factors = torch.tensor([[10**i for i in range(ndigit+1)][::-1]]).to(d1d2.device)
+class AdditionTokenizer():
+    """
+    This class is used to convert the input and output sequences into
+    the appropriate format for the model. It is a simple wrapper around
+    the AdditionDataset class.
+    """
 
-    # isolate the last digit of the sampled sequence
-    d3 = d1d2d3[:, -(ndigit+1):]
-    d3 = d3.flip(1) # reverse the digits to their "normal" order
-    
-    # decode the integers from individual digits
-    d1i = (d1d2[:,:ndigit] * factors[:,1:]).sum(1)
-    d2i = (d1d2[:,ndigit:ndigit*2] * factors[:,1:]).sum(1)
-    d3i_pred = (d3 * factors).sum(1)
-    d3i_gt = d1i + d2i # manually calculate the ground truth
-    
-    # evaluate the correctness of the results in this batch
-    correct = (d3i_pred == d3i_gt).cpu() # Software 1.0 vs. Software 2.0 fight RIGHT on this line haha
-    for i in range(len(correct)):
-        results.append(int(correct[i]))
-        if not correct[i] and mistakes_printed_already < 5: # only print up to 5 mistakes to get a sense
-            mistakes_printed_already += 1
-            print("GPT claims that %d + %d = %d but gt is %d" % (d1i[i], d2i[i], d3i_pred[i], d3i_gt[i]))
+    def __init__(self, ndigit=2):
+        self.ndigit = ndigit
+        self.vocab_size = 10
+        self.pad_token_id = -1
+
+    def get_vocab_size(self):
+        return 10 # digits 0..9
+
+    def decode(self, d1d2, d1d2d3):
+        factors = torch.tensor([[10**i for i in range(self.ndigit+1)][::-1]]).to(d1d2.device)
+
+        # isolate the last digit of the sampled sequence
+        d3 = d1d2d3[:, -(self.ndigit+1):]
+        d3 = d3.flip(1) # reverse the digits to their "normal" order
+        
+        # decode the integers from individual digits
+        d1i = (d1d2[:,:self.ndigit] * factors[:,1:]).sum(1)
+        d2i = (d1d2[:,self.ndigit:self.ndigit*2] * factors[:,1:]).sum(1)
+        d3i_pred = (d3 * factors).sum(1)
+        d3i_gt = d1i + d2i # manually calculate the ground truth
+        
+        # evaluate the correctness of the results in this batch
+        correct = (d3i_pred == d3i_gt)
+        return correct

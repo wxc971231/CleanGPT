@@ -10,25 +10,26 @@ import math
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import List, Tuple, Union, Optional
-from data.adder.prepare import AdditionDataset
+from data.adder.prepare import AdditionDataset, AdditionTokenizer
 
 class AutoRegressDataset(Dataset):
     def __init__(self, args:argparse.Namespace, data_path:str): 
         self.n_position = args.n_position
         self.data_path = data_path
-            
-    def __len__(self):
+
+        # use mmap_mode to avoid loading the entire dataset into memory
         data = np.load(self.data_path, mmap_mode='r', allow_pickle=True)
-        return len(data) - self.n_position
+        self.length = len(data) - self.n_position
+
+    def __len__(self):
+        return self.length 
 
     def __getitem__(self, idx):
         # Only return data-idx here, the batch data is constructed in collate_fn
         # by np.memmap to avoid loading the entire dataset into memory
-        return idx
+        return idx % self.length
 
 def collate_fn(batch, data_path, n_position):
-    # np.memmap allows accessing large files without loading the entire file into memory
-    # Construct a new np.memmap object for each batch to avoid memory leak (https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122)
     data = np.load(data_path, mmap_mode='r')
     idxs = torch.tensor(batch)
     if data.ndim == 1:
