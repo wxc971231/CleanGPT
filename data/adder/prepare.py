@@ -37,8 +37,11 @@ class AdditionDataset(Dataset):
         rng = torch.Generator()
         rng.manual_seed(1337)
         perm = torch.randperm(num, generator=rng)
-        num_test = min(int(num*0.2), 500)  # 20% of the whole dataset, or only up to 500
-        num_val = min(int(num*0.2), 500)   # 20% of the whole dataset, or only up to 1000
+        # num_test = min(int(num*0.2), 500)  # 20% of the whole dataset, or only up to 500
+        # num_val = min(int(num*0.2), 500)   # 20% of the whole dataset, or only up to 1000
+        num_test = int(num*0.15)
+        num_val = int(num*0.15)  
+        
         if split == 'train':
             self.ixes = perm[num_test+num_val:]
         elif split == 'val':

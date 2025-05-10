@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "1",
+                "CUDA_VISIBLE_DEVICES": "7",
                 "HF_HOME": "/data5/weixiaochen/TransformerCache",
             },
         },

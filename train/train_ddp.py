@@ -42,7 +42,7 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.init_from = None                       # training from scratch or resuming from latest snapshot within out-dir
 
     # data setting
-    args.adder_ndigit = 2                        # digits num for adder dataset
+    args.adder_ndigit = 3                        # digits num for adder dataset
 
     # optimizer setting
     args.lr_begin = 0                                       
@@ -54,13 +54,13 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.wd_begin = 1e-3                        # with baby networks can afford to go a bit higher (1e-4 ~ 1e-2)
     args.wd_end = args.wd_begin                 # For most of situation, keep the weight decay coefficient 'constant' is suitable
     args.wd_decr_style = "constant"            
-    args.ga_begin = 5                           # batch_grad_accum is used to simulate larger batch sizes              
+    args.ga_begin = 1                           # batch_grad_accum is used to simulate larger batch sizes              
     args.ga_end = args.ga_begin                 # with baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x
     args.grad_accum_step_incr_style = "constant"
     args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
 
     # training setting
-    args.batch_size_per_gpu = 256                                            # training batch_size (per GPU)
+    args.batch_size_per_gpu = 64                                            # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
     args.batch_num = 64 * args.ga_begin
     args.train_iters = 256 * args.batch_num                                 # total batch_num
@@ -97,8 +97,8 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    args.exp_name = 'ShakespeareChar'
-    args.dataset = 'shakespeare_char'           # tinystory, shakespeare_char, adder
+    args.exp_name = 'Adder(3)'
+    args.dataset = 'adder'           # tinystory, shakespeare_char, adder
     args.wandb_project = 'CleanGPT'
     args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
     args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
@@ -140,7 +140,7 @@ def load_dataset(args):
         dataset_train = AdditionDataset(args.adder_ndigit, 'train')
         dataset_val = AdditionDataset(args.adder_ndigit, 'val')
         dataset_test = AdditionDataset(args.adder_ndigit, 'test')
-        tokenizer = AdditionTokenizer()
+        tokenizer = AdditionTokenizer(args.adder_ndigit)
         args.vocab_size = tokenizer.vocab_size
     else:
         raise ValueError(f"dataset {args.dataset} not supported")
