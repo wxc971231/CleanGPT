@@ -6,6 +6,8 @@ sys.path.append(base_path)
 import torch
 from tqdm import tqdm
 from utils.utils_model import load_model
+from data.adder.prepare import AdditionDataset
+from data.data import build_dataloader
 
 def eval_score_adder(model, tokenizer, dataloader, total, desc=''):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
@@ -30,3 +32,25 @@ def eval_score_adder(model, tokenizer, dataloader, total, desc=''):
                 break
 
     return correct_rate
+
+def main():
+    # load model, tokenizer and decoder
+    device = 'cuda:0'
+    out_path = f"{base_path}/out/Adder(3)_1024_256_8_4"
+    args, model, dataset_name, tokenizer, decoder = load_model(out_path)
+    model = model.to(device).eval()
+
+    # setting
+    args.eval_batch_size_per_gpu = 64
+    args.eval_batch_num = 20
+    
+    # generate text & flow printing
+    with torch.inference_mode():
+        if dataset_name == 'adder':
+            problem_dataset = AdditionDataset(tokenizer.ndigit, 'test')
+            problem_dataloader = build_dataloader(args, problem_dataset, is_eval=True)
+            total = args.eval_batch_size_per_gpu * args.eval_batch_num
+            eval_score_adder(model, tokenizer, problem_dataloader, total, desc=f'Eval on add({tokenizer.ndigit})')
+
+if __name__ == "__main__":
+    main()

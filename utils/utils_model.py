@@ -7,7 +7,9 @@ import glob
 import pickle
 import json
 import torch
+import argparse
 from model.NanoGPT import NanoGPT, NanoGPTConfig
+from data.adder.prepare import AdditionTokenizer
 
 def remove_compiled_prefix(state_dict):
     # when using torch.compile, the model's name will be compiled to _orig_mod.xxx, which cause the state_dict can't be loaded directly.
@@ -52,8 +54,10 @@ def load_model(out_path=None):
             tokenizer = meta_data['stoi']
             decoder = meta_data['itos']
     elif dataset_name == 'adder':
-        pass
+        tokenizer = AdditionTokenizer(config['adder_ndigit'])
+        decoder = None
     else:
         raise Exception(f"{dataset_name} is not support currently")
     
-    return model, dataset_name, tokenizer, decoder
+    args = argparse.Namespace(**config)
+    return args, model, dataset_name, tokenizer, decoder
