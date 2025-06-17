@@ -109,7 +109,7 @@ class Trainer:
                 self.raw_model.load_state_dict(remove_compiled_prefix(snapshot.model_state))
                 self.optimizer.load_state_dict(snapshot.optimizer_state)
                 batch_factor = self.scheduler.load_state_dict(snapshot.scheduler_state)
-                self.ga_current = self.scheduler.get_ga_step()
+                self.ga_current = self.scheduler.ga_scheduler.step(0)
                 self.best_val_loss = snapshot.best_val_loss
                 self.batch_start = self.batch_now = {k: int(v * batch_factor) for k, v in snapshot.latest_batch.items()}
                 self.wandb_id = snapshot.wandb_id
@@ -395,6 +395,7 @@ class Trainer:
 
             wandb_log_dict.update({
                 f"{self.args.dataset}/batch": batch,
+                f"{self.args.dataset}/m_batch": int(batch/self.args.batch_num),
                 f'{self.args.dataset}/lr': new_lr,
                 f'{self.args.dataset}/wd': new_wd,
                 f'{self.args.dataset}/grad_norm': grad_norm,

@@ -43,17 +43,18 @@ def generate_text(model, dataset_name, tokenizer, decoder, prompt, max_length=50
         
 def main():
     # setting
-    device = 'cuda:0'
-    out_path = f"{base_path}/out/ShakespeareChar_1024_256_8_4"
-    prompt = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate:"
-    temperature = 0.02
-    top_k = None
-    do_sample = True
-    piece_len = 20
-    max_length = 1000
+    # device = 'cuda:0'
+    # out_path = f"{base_path}/out/ShakespeareChar_1024_256_8_4"
+    # prompt = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate:"
+    # temperature = 0.02
+    # top_k = None
+    # do_sample = True
+    # piece_len = 20
+    # max_length = 1000
 
-    # out_path = f"{base_path}/out/TinyStory_1024_256_8_4"
-    # prompt = "Once upon a time, "
+    device = 'cuda:0'
+    out_path = f"{base_path}/out/TinyStory_1024_256_8_4"
+    prompt = "Once upon a time, "
     temperature = 0.1
     top_k = None
     do_sample = False
@@ -61,7 +62,7 @@ def main():
     max_length = 1000
 
     # load model, tokenizer and decoder
-    model, dataset_name, tokenizer, decoder = load_model(out_path)
+    _, model, dataset_name, tokenizer, decoder = load_model(out_path)
     model = model.to(device).eval()
 
     # generate text & flow printing

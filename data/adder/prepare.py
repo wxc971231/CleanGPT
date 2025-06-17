@@ -32,7 +32,7 @@ class AdditionDataset(Dataset):
 
         # split up all addition problems into either training data or test data
         ndigit = self.ndigit
-        assert ndigit <= 3, "the lines below would be very memory inefficient, in future maybe refactor to support"
+        assert ndigit <= 4, "the lines below would be very memory inefficient, in future maybe refactor to support"
         num = (10**ndigit)**2 # total number of possible addition problems with ndigit numbers
         rng = torch.Generator()
         rng.manual_seed(1337)
