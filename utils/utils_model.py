@@ -10,6 +10,7 @@ import torch
 import argparse
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 from data.adder.prepare import AdditionTokenizer
+from data.multiplier.prepare import MultiplicationTokenizer
 
 def remove_compiled_prefix(state_dict):
     # when using torch.compile, the model's name will be compiled to _orig_mod.xxx, which cause the state_dict can't be loaded directly.
@@ -54,7 +55,10 @@ def load_model(out_path=None):
             tokenizer = meta_data['stoi']
             decoder = meta_data['itos']
     elif dataset_name == 'adder':
-        tokenizer = AdditionTokenizer(config['adder_ndigit'])
+        tokenizer = AdditionTokenizer(config['adder_ndigit'], config['adder_format_vocab'])
+        decoder = None
+    elif dataset_name == 'multiplier':
+        tokenizer = MultiplicationTokenizer(config['multiplier_ndigit'], config['multiplier_format_vocab'])
         decoder = None
     else:
         raise Exception(f"{dataset_name} is not support currently")

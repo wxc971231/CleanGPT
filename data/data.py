@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from typing import List, Tuple, Union, Optional
 from data.adder.prepare import AdditionDataset, AdditionTokenizer
+from data.multiplier.prepare import MultiplicationDataset, MultiplicationTokenizer
 
 class AutoRegressDataset(Dataset):
     def __init__(self, args:argparse.Namespace, data_path:str): 
@@ -65,6 +66,8 @@ def build_dataloader(args, dataset:AutoRegressDataset, is_eval:bool=False, curre
     if args.dataset in ['tinystory', 'shakespeare_char']:
         collate_func = lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position)
     elif args.dataset == 'adder':
+        collate_func = None
+    elif args.dataset == 'multiplier':
         collate_func = None
     else:
         raise ValueError(f"dataset {args.dataset} not supported")

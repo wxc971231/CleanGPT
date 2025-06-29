@@ -172,6 +172,7 @@ cython_debug/
 .pypirc
 
 # custum
+/test.ipynb
 /data/shakespeare_char/**
 !/data/shakespeare_char/prepare.py
 /data/tinystory/**

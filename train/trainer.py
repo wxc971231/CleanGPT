@@ -23,7 +23,7 @@ from train.scheduler import EarlyStopping, OptimizerParamScheduler
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 from utils.utils_model import remove_compiled_prefix
 from utils.utils import set_seed, clean_print
-from eval.eval_score import eval_score_adder
+from eval.eval_score import eval_score_adder, eval_score_multiplier
 
 @dataclass
 class Snapshot:
@@ -77,7 +77,7 @@ class Trainer:
 
         # eval setting
         self.eval_setting = {}
-        if self.args.dataset == 'adder':
+        if self.args.dataset in ['adder', 'multiplier']:
             self.eval_setting = {
                 'greedy': lambda: self._eval_score(sample=False),
                 # 'sample': lambda: self._eval_score(sample=True),
@@ -348,6 +348,10 @@ class Trainer:
             assert sample == False, "Sample mode is not supported for adder dataset"
             correct_rate = eval_score_adder(self.raw_model, self.tokenizer, problem_dataloader, total, desc)
             return correct_rate
+        elif self.args.dataset == 'multiplier':
+            assert sample == False, "Sample mode is not supported for multiplier dataset"
+            correct_rate = eval_score_multiplier(self.raw_model, self.tokenizer, problem_dataloader, total, desc)
+            return correct_rate
         else:
             raise Exception(f"Unknown dataset: {self.args.dataset}")
 
@@ -378,6 +382,9 @@ class Trainer:
                 with torch.inference_mode():  
                     for setting, eval_func in self.eval_setting.items():
                         if self.args.dataset == 'adder':
+                            correct_rate = eval_func()
+                            wandb_log_dict.update({f'{self.args.dataset}/correct_rate({setting})': correct_rate})
+                        elif self.args.dataset == 'multiplier':
                             correct_rate = eval_func()
                             wandb_log_dict.update({f'{self.args.dataset}/correct_rate({setting})': correct_rate})
                         else:
@@ -424,6 +431,12 @@ class Trainer:
                 log_value_tensor = torch.mean(torch.stack(log_gather_list), axis=0, dtype=torch.float32)
                 for i, key in enumerate(sorted(wandb_log_dict)):
                     wandb_log_dict[key] = log_value_tensor[i].item()
+                
+                    # print training info
+                    if self.args.dataset == 'adder' and 'correct_rate' in key:
+                        clean_print(f"Adder {key} = {wandb_log_dict[key]:.4f}", self.local_rank, '[Trainer]')
+                    elif self.args.dataset == 'multiplier' and 'correct_rate' in key:
+                        clean_print(f"Multiplier {key} = {wandb_log_dict[key]:.4f}", self.local_rank, '[Trainer]')
 
                     # early-stopping and save-ckpt by val_loss 
                     if key == f'{self.args.dataset}/val_loss':

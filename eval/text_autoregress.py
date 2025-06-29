@@ -25,7 +25,6 @@ def generate_text(model, dataset_name, tokenizer, decoder, prompt, max_length=50
 
             if generated_eos:
                 break
-
     elif dataset_name == 'shakespeare_char':
         eos_token_idx = None
         while len(res_str) < max_length:
@@ -36,8 +35,6 @@ def generate_text(model, dataset_name, tokenizer, decoder, prompt, max_length=50
             new_part = full_gen_str[len(res_str):]
             print(new_part, end='', flush=True)
             res_str = full_gen_str
-    elif dataset_name == 'adder':
-        pass
     else:
         raise Exception(f"{dataset_name} is not support currently")
         

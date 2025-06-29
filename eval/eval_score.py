@@ -7,17 +7,22 @@ import torch
 from tqdm import tqdm
 from utils.utils_model import load_model
 from data.adder.prepare import AdditionDataset
+from data.multiplier.prepare import MultiplicationDataset
 from data.data import build_dataloader
 
 def eval_score_adder(model, tokenizer, dataloader, total, desc=''):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
+    world_size = int(os.environ.get("WORLD_SIZE", default='1'))
     ndigit = tokenizer.ndigit
 
     results = []
-    with tqdm(total=total, desc=desc, position=local_rank) as pbar:
+    with tqdm(total=total, desc=f'[GPU0-{world_size-1}]: {desc}', disable=local_rank!=0) as pbar:
         for batch in dataloader:
             x = batch[0].to(local_rank)     # (batch_size, seql_len)
-            d1d2 = x[:, :ndigit*2]          # (batch_size, ndigit*2)
+            if tokenizer.format_vocab is None:
+                d1d2 = x[:, :ndigit*2]      # (batch_size, ndigit*2)
+            else:
+                d1d2 = x[:, :ndigit*2+2]    # (batch_size, ndigit*2+2), +2 for '+' and '='
             d1d2d3, _ = model.generate(d1d2, ndigit+1, do_sample=False)
 
             correct = tokenizer.decode(d1d2, d1d2d3)    # (batch_size, )
@@ -33,12 +38,40 @@ def eval_score_adder(model, tokenizer, dataloader, total, desc=''):
 
     return correct_rate
 
+def eval_score_multiplier(model, tokenizer, dataloader, total, desc=''):
+    local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
+    world_size = int(os.environ.get("WORLD_SIZE", default='1'))
+    ndigit = tokenizer.ndigit
+
+    results = []
+    with tqdm(total=total, desc=f'[GPU0-{world_size-1}]: {desc}', disable=local_rank != 0) as pbar:
+        for batch in dataloader:
+            x = batch[0].to(local_rank)         # (batch_size, seql_len)
+            if tokenizer.format_vocab is None:
+                d1d2 = x[:, :ndigit*2]          # (batch_size, ndigit*2)
+            else:
+                d1d2 = x[:, :ndigit*2+2]        # (batch_size, ndigit*2+2), +2 for '+' and '='
+            d1d2d3, _ = model.generate(d1d2, ndigit*2, do_sample=False)
+
+            correct = tokenizer.decode(d1d2, d1d2d3)    # (batch_size, )
+            results.append(correct)
+
+            correct_all = torch.vstack(results).to(torch.float32)
+            correct_rate = correct_all.mean().item()
+            pbar.set_postfix({'correct_rate': f'{correct_rate:.2f}'})
+            pbar.update(len(correct))
+
+            if correct_all.numel() >= total:
+                break
+
+    return correct_rate
+
 def main():
     # load model, tokenizer and decoder
-    device = 'cuda:0'
-    out_path = f"{base_path}/out/Adder(3)_1024_256_8_4"
+    #out_path = f"{base_path}/out/Adder(3)_1024_256_8_4"
+    out_path = f"{base_path}/out/Multiplier(2_format)_1024_256_8_4"
     args, model, dataset_name, tokenizer, decoder = load_model(out_path)
-    model = model.to(device).eval()
+    model = model.to('cuda:0').eval()
 
     # setting
     args.eval_batch_size_per_gpu = 64
@@ -51,6 +84,11 @@ def main():
             problem_dataloader = build_dataloader(args, problem_dataset, is_eval=True)
             total = args.eval_batch_size_per_gpu * args.eval_batch_num
             eval_score_adder(model, tokenizer, problem_dataloader, total, desc=f'Eval on add({tokenizer.ndigit})')
+        elif dataset_name == 'multiplier':
+            problem_dataset = MultiplicationDataset(tokenizer.ndigit, 'test', format_vocab=tokenizer.format_vocab)
+            problem_dataloader = build_dataloader(args, problem_dataset, is_eval=True)
+            total = args.eval_batch_size_per_gpu * args.eval_batch_num
+            eval_score_multiplier(model, tokenizer, problem_dataloader, total, desc=f'Eval on mul({tokenizer.ndigit})')
 
 if __name__ == "__main__":
     main()

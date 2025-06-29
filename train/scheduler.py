@@ -2,6 +2,7 @@ import math
 import os
 from dataclasses import dataclass
 import numpy as np
+from utils.utils import clean_print
 
 class EarlyStopping:
     """ Early stops the training if validation loss doesn't improve after a given patience. """
@@ -18,7 +19,8 @@ class EarlyStopping:
             self.counter = 0        # Reset counter if validation loss improves            
         else:
             self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
+            clean_print(f'EarlyStopping counter: {self.counter} out of {self.patience}', local_rank, '[Trainer]')
             if self.counter >= self.patience:
                 self.early_stop = True
 
