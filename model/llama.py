@@ -142,7 +142,7 @@ class MyLlama(torch.nn.Module):
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             # note: using list [-1] to preserve the time dim
-            logits = self.lm_head(hidden_states[:, [-1], :])# (batch_size, 1, n_embed)
+            logits = self.lm_head(hidden_states[:, [-1], :])# (batch_size, 1, 1)
             loss = None
 
         return logits, loss

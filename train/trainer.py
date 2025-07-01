@@ -167,6 +167,13 @@ class Trainer:
         # check MACs and params quantity, which can only work befor torhc.compile
         flops, macs, params = self._check_MACs()
 
+        # reset weight tying in case the model is loaded from a snapshot or pretrained ckpt
+        if self.args.weight_tying:
+            if self.args.model == 'NanoGPT':
+                self.raw_model.transformer.wte.weight = self.raw_model.lm_head.weight
+            elif self.args.model == 'llama':
+                self.raw_model.lm_head.weight = self.raw_model.model.embed_tokens.weight
+           
         # compile the model
         if self.args.compile:
             clean_print("compiling the model... (takes a ~minute)", self.local_rank, '[Trainer]')
