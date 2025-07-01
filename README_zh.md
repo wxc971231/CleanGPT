@@ -48,8 +48,8 @@ CleanGPT：一个基于PyTorch实现的[GPT](https://github.com/openai/gpt-2)类
         args.n_position = 1024
         args.n_layer = 6
         args.n_head = 4
-        args.n_embd = 384
-        args.n_inner = 4 * args.n_embd
+        args.n_embed = 384
+        args.n_inner = 4 * args.n_embed
         args.dropout = 0.0                          
         args.init_from = None                       
 
@@ -76,34 +76,23 @@ CleanGPT：一个基于PyTorch实现的[GPT](https://github.com/openai/gpt-2)类
     ```
     通常我们会训练到过拟合，直到触发早停
     ![](img/train_log.png)
-4. 评估最优 Checkpoint。将训练过程中生成的输出文件路径粘贴到 `eval/text_autoregress.py` 中，会自动加载最优 Checkpoint 进行自回归生成
-    
+4. 评估最优 Checkpoint。将训练过程中生成的输出文件路径粘贴到 `eval/text_autoregress.py` 中，会自动加载最优 Checkpoint 进行自回归生成。用 TinyStory 数据集训练的一个示例如下：
     ```text
-    Shall I compare thee to a summer's day? Thou art more lovely and more temperate:
-    My daughtks like on privily seems or a misudy.
-
-    AUTOLYCUS:
-    A missering me set good, I cannot crals him held
-    Than oak on every presently wolves and grain;
-    Then did lighten some not my father commendsmanding.
-
-    BUCKINGHAM:
-    I thank you love's frier'd, and rue my were tell erry
-    Yet die, with weapon you are!
-
-    HENRY BOLINGBROKE:
-    For me the kings of cord by my heaven
-    And precious pattle. Come, you much your grace
-    Of argue him so facewelve his sight
-    And courabled fear, my noble were before
-    ...
+    Once upon a time, 3 year old girl named Lucy wanted to go on an adventure. She asked her mom if she could go. Her mom said yes, but only if she stayed close.
+    Lucy was so excited! She ran outside and started exploring. She found a big tree and decided to climb it. She climbed higher and higher until she was at the top.
+    At the top, Lucy looked around and saw a beautiful view. She wanted to stay and enjoy it for a while. Then she carefully climbed down and ran back home.
+    When she got home, her mom asked her what she was doing. Lucy said, "I'm going on an adventure!" Her mom smiled and said, "That sounds like a great idea!"
+    Lucy was so happy. She had a wonderful time exploring and eating the view. She was so glad she had stayed close to home.</s>
     ```
 
 
 ## TODO
-- 支持混合数据集训练
-- 支持 llama 模型
-- 支持 kvcahce
-- 支持 RLHF
-- 支持多模态输入
-- 将本项目扩展至类似 [Gato](https://arxiv.org/pdf/2205.06175) 的控制任务 
+
+| Item  | Note  |
+|-------|-----|
+| 支持混合数据集训练 | -  |
+| 支持 llama 模型 | Done (hugging face llama)  | 
+| 支持 kvcahce | Done (for llama) |
+| 支持 RLHF | - |
+| 支持多模态输入|-|
+| 将本项目扩展至类似 [Gato](https://arxiv.org/pdf/2205.06175) 的控制任务|-|

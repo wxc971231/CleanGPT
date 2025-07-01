@@ -46,8 +46,8 @@ CleanGPT: A training framework for GPT-style model implemented with PyTorch. Cle
         args.n_position = 1024
         args.n_layer = 6
         args.n_head = 4
-        args.n_embd = 384
-        args.n_inner = 4 * args.n_embd
+        args.n_embed = 384
+        args.n_inner = 4 * args.n_embed
         args.dropout = 0.0                          
         args.init_from = None                       
 
@@ -75,31 +75,21 @@ CleanGPT: A training framework for GPT-style model implemented with PyTorch. Cle
     ```
     Typically, we train until overfitting and early stopping is triggered.
     ![](img/train_log.png)
-4. Evaluate the best Checkpoint. Paste the output file path generated during training into `text_autoregress.py`, it will automatically load the best Checkpoint for autoregressive generation.
+4. Evaluate the best Checkpoint. Paste the output file path generated during training into `text_autoregress.py`, it will automatically load the best Checkpoint for autoregressive generation. An example trained on the TinyStory dataset is as follows:
     ```text
-    Shall I compare thee to a summer's day? Thou art more lovely and more temperate:
-    My daughtks like on privily seems or a misudy.
-
-    AUTOLYCUS:
-    A missering me set good, I cannot crals him held
-    Than oak on every presently wolves and grain;
-    Then did lighten some not my father commendsmanding.
-
-    BUCKINGHAM:
-    I thank you love's frier'd, and rue my were tell erry
-    Yet die, with weapon you are!
-
-    HENRY BOLINGBROKE:
-    For me the kings of cord by my heaven
-    And precious pattle. Come, you much your grace
-    Of argue him so facewelve his sight
-    And courabled fear, my noble were before
-    ...
+    Once upon a time, 3 year old girl named Lucy wanted to go on an adventure. She asked her mom if she could go. Her mom said yes, but only if she stayed close.
+    Lucy was so excited! She ran outside and started exploring. She found a big tree and decided to climb it. She climbed higher and higher until she was at the top.
+    At the top, Lucy looked around and saw a beautiful view. She wanted to stay and enjoy it for a while. Then she carefully climbed down and ran back home.
+    When she got home, her mom asked her what she was doing. Lucy said, "I'm going on an adventure!" Her mom smiled and said, "That sounds like a great idea!"
+    Lucy was so happy. She had a wonderful time exploring and eating the view. She was so glad she had stayed close to home.</s>
     ```
 ## TODO
-- Support training with mixed datasets
-- Support llama model
-- Support kvcache
-- Support RLHF
-- Support multimodal input
-- Extend this project to control tasks similar to [Gato](https://arxiv.org/pdf/2205.06175)
+
+| Item  | Note  |
+|-------|-----|
+| Support training with mixed datasets   | -  |
+| Support llama model | Done (hugging face llama)  | 
+| Support kvcache | Done (for llama) |
+| Support RLHF | - |
+|Support multimodal input|-|
+|Extend this project to control tasks similar to [Gato](https://arxiv.org/pdf/2205.06175)|-|

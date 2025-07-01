@@ -32,14 +32,17 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.world_size = WORLD_SIZE
 
     # model setting
-    args.model = 'NanoGPT'
+    args.model = 'NanoGPT'                # NanoGPT, llama
     args.n_position = 1024
-    args.n_layer = 12
-    args.n_head = 8
-    args.n_embd = 256
-    args.n_inner = 4 * args.n_embd
-    args.dropout = 0.0                          # for pretraining 0 is good, for finetuning try 0.1+
-    args.init_from = None                       # training from scratch or resuming from latest snapshot within out-dir
+    args.n_layer = 10
+    args.n_q_head = 8
+    args.n_kv_head = 8
+    args.n_head = args.n_q_head
+    args.n_embed = 512
+    args.n_inner = 4 * args.n_embed
+    args.dropout = 0.0                  # for pretraining 0 is good, for finetuning try 0.1+
+    args.dropout_attn = 0.0             # for pretraining 0 is good, for finetuning try 0.1+
+    args.init_from = None               # training from scratch or resuming from latest snapshot within out-dir
 
     # data setting
     args.math_vocab = {'=': 10, '+': 11, 'x': 12, }     # digits num for adder and multiplier dataset
@@ -66,13 +69,13 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.wd_begin = 1e-3                        # with baby networks can afford to go a bit higher (1e-4 ~ 1e-2)
     args.wd_end = args.wd_begin                 # For most of situation, keep the weight decay coefficient 'constant' is suitable
     args.wd_decr_style = "constant"            
-    args.ga_begin = 2                           # batch_grad_accum is used to simulate larger batch sizes              
+    args.ga_begin = 4                           # batch_grad_accum is used to simulate larger batch sizes              
     args.ga_end = args.ga_begin                 # with baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x
     args.grad_accum_step_incr_style = "constant"
     args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
 
     # training setting
-    args.batch_size_per_gpu = 128                                            # training batch_size (per GPU)
+    args.batch_size_per_gpu = 32                                            # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
     args.batch_num = 64 * args.ga_begin
     args.train_iters = 256 * args.batch_num                                 # total batch_num
@@ -94,7 +97,7 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.add_bias = False                       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     args.override_opt_param_scheduler = True   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
     args.skip_first_eval = False                # skip the first evaluation to at batch 0
-    args.wandb = False                           # use wandb to log training info
+    args.wandb = True                           # use wandb to log training info
     args.use_early_stopping = True              # use the early stopping mechanism to aviod overfitting
     args.save_ckpt = True                       # update ckpt by save_interval and save_strategy
     args.save_ckpt_num = 3                      # the number of ckpt to save, 0 for saving all ckpt
@@ -109,8 +112,8 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    # args.dataset = 'tinystory'                  # tinystory, shakespeare_char, adder, multiplier
-    # args.exp_name = 'TinyStory'
+    args.dataset = 'tinystory'                  # tinystory, shakespeare_char, adder, multiplier
+    args.exp_name = 'TinyStory'
     
     # args.dataset = 'shakespeare_char'
     # args.exp_name = 'ShakespeareChar'
@@ -118,11 +121,12 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     # args.dataset = 'adder'                      
     # args.exp_name = f'Adder({args.adder_ndigit}_format)' if args.adder_use_format else f'Adder({args.adder_ndigit})'
     
-    args.dataset = 'multiplier'                  
-    args.exp_name = f'Multiplier({args.multiplier_ndigit}_format)' if args.multiplier_use_format else f'Multiplier({args.multiplier_ndigit})'
+    # args.dataset = 'multiplier'                  
+    # args.exp_name = f'Multiplier({args.multiplier_ndigit}_format)' if args.multiplier_use_format else f'Multiplier({args.multiplier_ndigit})'
     
+    # args.exp_name = 'Debug'
     args.wandb_project = 'CleanGPT'
-    args.exp_profile = f'{args.exp_name}_{args.n_position}_{args.n_embd}_{args.n_head}_{args.n_layer}'
+    args.exp_profile = f'{args.exp_name}_{args.model}_{args.n_position}_{args.n_embed}_{args.n_head}_{args.n_layer}'
     args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
     args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
     args.out_dir = f'{base_path}/out/{args.exp_profile}'
@@ -163,13 +167,13 @@ def load_dataset(args):
         dataset_val = AdditionDataset(args.adder_ndigit, 'val', format_vocab=args.adder_format_vocab)
         dataset_test = AdditionDataset(args.adder_ndigit, 'test', format_vocab=args.adder_format_vocab)
         tokenizer = AdditionTokenizer(args.adder_ndigit, format_vocab=args.adder_format_vocab)
-        args.vocab_size = 10 * len(args.math_vocab) if args.adder_use_format else 10
+        args.vocab_size = 10 + len(args.math_vocab) if args.adder_use_format else 10
     elif args.dataset == 'multiplier':
         dataset_train = MultiplicationDataset(args.adder_ndigit, 'train', format_vocab=args.multiplier_format_vocab)
         dataset_val = MultiplicationDataset(args.adder_ndigit, 'val', format_vocab=args.multiplier_format_vocab)
         dataset_test = MultiplicationDataset(args.adder_ndigit, 'test', format_vocab=args.multiplier_format_vocab)
         tokenizer = MultiplicationTokenizer(args.adder_ndigit, format_vocab=args.multiplier_format_vocab)
-        args.vocab_size = 10 * len(args.math_vocab) if args.adder_use_format else 10
+        args.vocab_size = 10 + len(args.math_vocab) if args.adder_use_format else 10
     else:
         raise ValueError(f"dataset {args.dataset} not supported")
     

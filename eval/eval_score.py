@@ -9,6 +9,8 @@ from utils.utils_model import load_model
 from data.adder.prepare import AdditionDataset
 from data.multiplier.prepare import MultiplicationDataset
 from data.data import build_dataloader
+from model.NanoGPT import NanoGPT
+from model.llama import MyLlama
 
 def eval_score_adder(model, tokenizer, dataloader, total, desc=''):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
@@ -51,8 +53,13 @@ def eval_score_multiplier(model, tokenizer, dataloader, total, desc=''):
                 d1d2 = x[:, :ndigit*2]          # (batch_size, ndigit*2)
             else:
                 d1d2 = x[:, :ndigit*2+2]        # (batch_size, ndigit*2+2), +2 for '+' and '='
-            d1d2d3, _ = model.generate(d1d2, ndigit*2, do_sample=False)
-
+            if isinstance(model, NanoGPT):
+                d1d2d3, _ = model.generate(d1d2, ndigit*2, do_sample=False)
+            elif isinstance(model, MyLlama):
+                d1d2d3, _ = model.generate(d1d2, ndigit*2, do_sample=False,)
+            else:
+                raise ValueError(f"Unsupported model type: {type(model)}")
+            
             correct = tokenizer.decode(d1d2, d1d2d3)    # (batch_size, )
             results.append(correct)
 
@@ -68,8 +75,8 @@ def eval_score_multiplier(model, tokenizer, dataloader, total, desc=''):
 
 def main():
     # load model, tokenizer and decoder
-    #out_path = f"{base_path}/out/Adder(3)_1024_256_8_4"
-    out_path = f"{base_path}/out/Multiplier(2_format)_1024_256_8_4"
+    # out_path = f"{base_path}/out/Multiplier(3_format)_llama_1024_512_8_10"
+    out_path = f"{base_path}/out/Multiplier(3_format)_NanoGPT_1024_512_8_10"
     args, model, dataset_name, tokenizer, decoder = load_model(out_path)
     model = model.to('cuda:0').eval()
 

@@ -20,6 +20,7 @@ from calflops import calculate_flops
 
 from data.data import build_dataloader
 from train.scheduler import EarlyStopping, OptimizerParamScheduler
+from model.llama import MyLlama, MyLlamaConfig
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 from utils.utils_model import remove_compiled_prefix
 from utils.utils import set_seed, clean_print
@@ -58,7 +59,8 @@ class Trainer:
         # build training components
         self._build_model()
         self.early_stopping = EarlyStopping(patience=args.early_stopping_patience, delta=args.early_stopping_delta)
-        self.optimizer = self.raw_model.configure_optimizers(self.args, self.local_rank)  
+        self.optimizer = self.raw_model.configure_optimizers(self.args, self.local_rank) if args.model == 'NanoGPT' else \
+                         self.raw_model.configure_optimizers()
         self.scheduler = OptimizerParamScheduler(self.args, self.optimizer)    
         self._init_model()
 
@@ -84,13 +86,28 @@ class Trainer:
             }
 
     def _build_model(self):
+        pad_token_id = self.tokenizer.pad_token_id if self.tokenizer is not None else None
         if self.args.model == 'NanoGPT':
             model_args = {key: getattr(self.args, key) for key in [
-                'n_position', 'n_layer', 'n_head', 'n_embd', 'vocab_size', 'dropout', 'add_bias', 'weight_tying'
+                'n_position', 'n_layer', 'n_head', 'n_embed', 'vocab_size', 'dropout', 'dropout_attn', 'add_bias', 'weight_tying'
             ]}
-            gptconf = NanoGPTConfig(**model_args)
-            mask_out_token = self.tokenizer.pad_token_id if self.tokenizer is not None else None
-            self.raw_model = NanoGPT(gptconf, mask_out_token).to(self.local_rank).train()
+            model_args.update({'mask_out_token': pad_token_id})
+            gpt_conf = NanoGPTConfig(**model_args)
+            self.raw_model = NanoGPT(gpt_conf).to(self.local_rank).train()
+        elif self.args.model == 'llama':
+            model_args = {key: getattr(self.args, key) for key in [
+                'n_position', 'n_layer', 'n_q_head', 'n_kv_head', 'n_embed', 'vocab_size', 
+                'rms_norm_eps', 'weight_tying', 'dropout_attn', 'add_bias', 'lr_begin',
+                'adam_beta1', 'adam_beta2', 'adam_eps', 
+            ]}
+            model_args.update({
+                'pad_token_id': pad_token_id,
+                'mask_out_token': pad_token_id,
+                'weight_decay': self.args.wd_begin,
+            })
+            assert self.args.wd_decr_style == "constant"
+            llama_conf = MyLlamaConfig(**model_args)
+            self.raw_model = MyLlama(llama_conf).to(self.local_rank).train()
         else:
             raise Exception(f'{self.args.model} is not support currently')
     
@@ -136,7 +153,7 @@ class Trainer:
             override_args = dict(dropout=self.args.dropout) # only dropout can be overwritten
             self.raw_model = self.raw_model.from_pretrained(self.args.init_from, override_args)
             # override the created config params, so we can store them into checkpoint correctly
-            for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+            for k in ['n_layer', 'n_head', 'n_embed', 'block_size', 'bias', 'vocab_size']:
                 setattr(self.args, getattr(self.raw_model.config, k))
             clean_print(f"Resuming training from OpenAI GPT-2 weights: [{self.args.init_from}]", self.local_rank, '[Trainer]')
         else:
@@ -342,7 +359,7 @@ class Trainer:
         desc_sample = f'sample{self.args.resample_times}' if sample else 'greedy'
         desc = f'Evaluating on {self.args.dataset}({desc_sample})'
         problem_dataloader = self.dataloader_dict['test']
-        total = self.args.problem_batch_num * self.args.problem_batch_size_per_gpu
+        total = self.args.total_problem_num
         
         if self.args.dataset == 'adder':
             assert sample == False, "Sample mode is not supported for adder dataset"

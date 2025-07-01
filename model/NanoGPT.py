@@ -17,6 +17,19 @@ import torch.nn as nn
 from torch.nn import functional as F
 from utils.utils import clean_print
 
+@dataclass
+class NanoGPTConfig:
+    n_position: int = 1024
+    vocab_size: int = 50304     # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    n_layer: int = 12
+    n_head: int = 12
+    n_embed: int = 768
+    dropout: float = 0.0
+    dropout_attn: float = 0.0
+    weight_tying: bool = True   # share token-embedding-vector between input token-embedding layer and output lm-head layer
+    add_bias: bool = True       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    mask_out_token: int = None  # if not None, this token will be masked out in the loss calculation, e.g. for padding tokens
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
     def __init__(self, ndim, bias):
@@ -31,18 +44,19 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.n_head = config.n_head
-        self.n_embd = config.n_embd
+        self.n_embed = config.n_embed
         self.dropout = config.dropout
-        assert config.n_embd % config.n_head == 0
+        self.dropout_attn = config.dropout_attn
+        assert config.n_embed % config.n_head == 0
         
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.add_bias)
+        self.c_attn = nn.Linear(config.n_embed, 3 * config.n_embed, bias=config.add_bias)
         
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.add_bias)
+        self.c_proj = nn.Linear(config.n_embed, config.n_embed, bias=config.add_bias)
         
         # regularization
-        self.attn_dropout = nn.Dropout(config.dropout)
+        self.attn_dropout = nn.Dropout(config.dropout_attn)
         self.resid_dropout = nn.Dropout(config.dropout)
         
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
@@ -56,10 +70,10 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", bias)
 
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embed)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+        q, k, v  = self.c_attn(x).split(self.n_embed, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -69,7 +83,7 @@ class CausalSelfAttention(nn.Module):
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=None, 
-                dropout_p=self.dropout if self.training else 0, 
+                dropout_p=self.dropout_attn if self.training else 0, 
                 is_causal=True
             )
         else:
@@ -88,9 +102,9 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.add_bias)
+        self.c_fc    = nn.Linear(config.n_embed, 4 * config.n_embed, bias=config.add_bias)
         self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.add_bias)
+        self.c_proj  = nn.Linear(4 * config.n_embed, config.n_embed, bias=config.add_bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -103,9 +117,9 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.add_bias)
+        self.ln_1 = LayerNorm(config.n_embed, bias=config.add_bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.add_bias)
+        self.ln_2 = LayerNorm(config.n_embed, bias=config.add_bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -113,35 +127,23 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-@dataclass
-class NanoGPTConfig:
-    n_position: int = 1024
-    vocab_size: int = 50304     # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-    dropout: float = 0.0
-    weight_tying: bool = True   # share token-embedding-vector between input token-embedding layer and output lm-head layer
-    add_bias: bool = True       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    
 class NanoGPT(nn.Module):
     local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
     
-    def __init__(self, config, mask_out_token=None):
+    def __init__(self, config):
         super().__init__()
         assert config.vocab_size is not None
         assert config.n_position is not None
         self.config = config
-        self.mask_out_token = mask_out_token
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.n_position, config.n_embd),
+            wte = nn.Embedding(config.vocab_size, config.n_embed),
+            wpe = nn.Embedding(config.n_position, config.n_embed),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.add_bias),
+            ln_f = LayerNorm(config.n_embed, bias=config.add_bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
         if config.weight_tying:
             # with weight tying when using torch.compile() some warnings get generated:
             # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -174,7 +176,7 @@ class NanoGPT(nn.Module):
         # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
         cfg = self.config
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd//cfg.n_head, cfg.n_position
+        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embed//cfg.n_head, cfg.n_position
         flops_per_token = 6*N + 12*L*H*Q*T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
@@ -199,27 +201,28 @@ class NanoGPT(nn.Module):
         pos = torch.arange(0, t, dtype=torch.long, device=device)   # (seq_len, )
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx)             # (batch_size, seq_len, n_embd)
-        pos_emb = self.transformer.wpe(pos)             # (seq_len, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)    # (batch_size, seq_len, n_embd)
+        tok_emb = self.transformer.wte(idx)             # (batch_size, seq_len, n_embed)
+        pos_emb = self.transformer.wpe(pos)             # (seq_len, n_embed)
+        x = self.transformer.drop(tok_emb + pos_emb)    # (batch_size, seq_len, n_embed)
         for block in self.transformer.h:
             x = block(x)                                
-        x = self.transformer.ln_f(x)                    # (batch_size, seq_len, n_embd)
+        x = self.transformer.ln_f(x)                    # (batch_size, seq_len, n_embed)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)                    # (batch_size, seq_len)
+            logits = self.lm_head(x)                    # (batch_size, seq_len, vocab_size)
             
-            if self.mask_out_token is None:
+            if self.config.mask_out_token is None:
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
             else:
                 # mask out loss contributions from padding tokens
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction='none')
-                mask = (targets != self.mask_out_token).float()
+                mask = (targets != self.config.mask_out_token).float()
                 loss = (loss * mask.view(-1)).sum() / mask.sum()
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            # note: using list [-1] to preserve the time dim
+            logits = self.lm_head(x[:, [-1], :])        # (batch_size, 1, n_embed)
             loss = None
 
         return logits, loss
@@ -235,68 +238,68 @@ class NanoGPT(nn.Module):
             if hasattr(block.attn, 'bias'):
                 block.attn.bias = block.attn.bias[:,:,:n_position,:n_position]
 
-    @classmethod
-    def from_pretrained(cls, model_type, override_config=None):
-        assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
+    # @classmethod
+    # def from_pretrained(cls, model_type, override_config=None):
+    #     assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         
-        # only dropout can be overridden
-        override_config = override_config or {} 
-        assert all(k == 'dropout' for k in override_config)
-        from transformers import GPT2LMHeadModel
-        clean_print(f"loading weights from pretrained gpt: {model_type}", NanoGPT.local_rank, '[NanoGPT]')
+    #     # only dropout can be overridden
+    #     override_config = override_config or {} 
+    #     assert all(k == 'dropout' for k in override_config)
+    #     from transformers import GPT2LMHeadModel
+    #     clean_print(f"loading weights from pretrained gpt: {model_type}", NanoGPT.local_rank, '[NanoGPT]')
 
-        # n_layer, n_head and n_embd are determined from model_type
-        config_config = {
-            'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
-            'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
-            'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
-            'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
-        }[model_type]
-        clean_print("forcing vocab_size=50257, n_position=1024, bias=True", NanoGPT.local_rank, '[NanoGPT]')
-        config_config['vocab_size'] = 50257     # always 50257 for GPT model checkpoints
-        config_config['n_position'] = 1024      # always 1024 for GPT model checkpoints
-        config_config['add_bias'] = True        # always True for GPT model checkpoints
+    #     # n_layer, n_head and n_embed are determined from model_type
+    #     config_config = {
+    #         'gpt2':         dict(n_layer=12, n_head=12, n_embed=768),  # 124M params
+    #         'gpt2-medium':  dict(n_layer=24, n_head=16, n_embed=1024), # 350M params
+    #         'gpt2-large':   dict(n_layer=36, n_head=20, n_embed=1280), # 774M params
+    #         'gpt2-xl':      dict(n_layer=48, n_head=25, n_embed=1600), # 1558M params
+    #     }[model_type]
+    #     clean_print("forcing vocab_size=50257, n_position=1024, bias=True", NanoGPT.local_rank, '[NanoGPT]')
+    #     config_config['vocab_size'] = 50257     # always 50257 for GPT model checkpoints
+    #     config_config['n_position'] = 1024      # always 1024 for GPT model checkpoints
+    #     config_config['add_bias'] = True        # always True for GPT model checkpoints
         
-        # we can override the dropout rate, if desired
-        if 'dropout' in override_config:
-            clean_print(f"overriding dropout rate to [{override_config['dropout']}]", NanoGPT.local_rank, '[NanoGPT]')
-            config_config['dropout'] = override_config['dropout']
+    #     # we can override the dropout rate, if desired
+    #     if 'dropout' in override_config:
+    #         clean_print(f"overriding dropout rate to [{override_config['dropout']}]", NanoGPT.local_rank, '[NanoGPT]')
+    #         config_config['dropout'] = override_config['dropout']
 
-        # create a from-scratch initialized minGPT model
-        config = NanoGPTConfig(**config_config)
-        model = NanoGPT(config)
+    #     # create a from-scratch initialized minGPT model
+    #     config = NanoGPTConfig(**config_config)
+    #     model = NanoGPT(config)
 
-        # discard this mask / buffer, not a param
-        sd = model.state_dict()
-        sd_keys = sd.keys()
-        sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] 
+    #     # discard this mask / buffer, not a param
+    #     sd = model.state_dict()
+    #     sd_keys = sd.keys()
+    #     sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] 
 
-        # init a huggingface/transformers model
-        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
-        sd_hf = model_hf.state_dict()
+    #     # init a huggingface/transformers model
+    #     model_hf = GPT2LMHeadModel.from_pretrained(model_type)
+    #     sd_hf = model_hf.state_dict()
 
-        # copy while ensuring all of the parameters are aligned and match in names and shapes
-        sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]        # same, just the mask (buffer)
-        assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+    #     # copy while ensuring all of the parameters are aligned and match in names and shapes
+    #     sd_keys_hf = sd_hf.keys()
+    #     sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
+    #     sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')]        # same, just the mask (buffer)
+    #     assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
 
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
-        # this means that we have to transpose these weights when we import them
-        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-        for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
-                # special treatment for the Conv1D weights we need to transpose
-                assert sd_hf[k].shape[::-1] == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k].t())
-            else:
-                # vanilla copy over the other parameters
-                assert sd_hf[k].shape == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k])
+    #     # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
+    #     # this means that we have to transpose these weights when we import them
+    #     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+    #     for k in sd_keys_hf:
+    #         if any(k.endswith(w) for w in transposed):
+    #             # special treatment for the Conv1D weights we need to transpose
+    #             assert sd_hf[k].shape[::-1] == sd[k].shape
+    #             with torch.no_grad():
+    #                 sd[k].copy_(sd_hf[k].t())
+    #         else:
+    #             # vanilla copy over the other parameters
+    #             assert sd_hf[k].shape == sd[k].shape
+    #             with torch.no_grad():
+    #                 sd[k].copy_(sd_hf[k])
 
-        return model
+    #     return model
 
     def configure_optimizers(self, args, device_type=0):
         # start with all of the candidate parameters
@@ -359,9 +362,11 @@ class NanoGPT(nn.Module):
                 _, idx_next = torch.topk(probs, k=1, dim=-1)        # (batch_size, 1)
 
             # exit if we hit the end of the sequence token
-            if eos_token_idx is not None and idx_next.item() == eos_token_idx:
-                generated_eos = True
-                break
+            if eos_token_idx is not None:
+                assert len(idx_cond) == 1, "eos_token_idx is only supported for batch size 1"
+                if idx_next.item() == eos_token_idx:
+                    generated_eos = True
+                    break
 
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)

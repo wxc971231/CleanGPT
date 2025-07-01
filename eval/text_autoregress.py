@@ -50,7 +50,7 @@ def main():
     # max_length = 1000
 
     device = 'cuda:0'
-    out_path = f"{base_path}/out/TinyStory_1024_256_8_4"
+    out_path = f"{base_path}/out/TinyStory_llama_1024_512_8_10"
     prompt = "Once upon a time, "
     temperature = 0.1
     top_k = None

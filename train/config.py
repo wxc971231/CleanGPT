@@ -111,7 +111,7 @@ def _add_model_args(parser):
     )
     group.add_argument(
         "--n-inner", type=int, default=None,
-        help="Dimensionality of the inner feed-forward layers. `None` will set it to 4 times n_embd",
+        help="Dimensionality of the inner feed-forward layers. `None` will set it to 4 times n_embed",
     )
     group.add_argument(
         "--activation-fn", type=str, default="gelu",
@@ -121,6 +121,10 @@ def _add_model_args(parser):
     group.add_argument(
         "--layer-norm-epsilon", type=float, default=1e-5,
         help="The epsilon to use in the layer normalization layers.",
+    )
+    group.add_argument(
+        "--rms-norm-eps", type=float, default=1e-6,
+        help="RMS Norm epsilon, special for llama.",
     )
     group.add_argument(
         "--dropout", type=float, default=0.2,
