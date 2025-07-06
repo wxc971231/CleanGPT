@@ -59,7 +59,7 @@ def build_dataloader(args, dataset:AutoRegressDataset, is_eval:bool=False, curre
         seed=seed,
         init_batch=current_batch, 
         batch_size_per_gpu=batch_size_per_gpu,
-        batch_num_per_iter=args.eval_batch_num if is_eval else args.eval_interval,
+        batch_num_per_iter=args.eval_batch_num if is_eval else args.batch_num,
         drop_last=False
     )
 

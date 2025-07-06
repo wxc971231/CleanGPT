@@ -315,7 +315,7 @@ class Trainer:
     def _run_macro_batch(self, is_train=False):
         macro_batch_now = self.batch_now['train'] // self.args.batch_num
         if is_train:
-            total = self.args.eval_interval
+            total = self.args.batch_num
             desc = f"[GPU0-{self.world_size-1}]: Trianing batch {macro_batch_now}({self.batch_now['train']}-{self.batch_now['train'] + self.args.batch_num})"
             dataloader = self.dataloader_dict['train']
             dataloader.sampler.set_batch(self.batch_now['train'], macro_batch_now, True)     
@@ -385,7 +385,7 @@ class Trainer:
             dataset_visited_cnt = np.zeros(len(self.dataset_dict['train']), dtype=np.int8)
 
         # start training
-        for batch in range(self.batch_start['train'], self.args.train_iters + 1, self.args.eval_interval):  
+        for batch in range(self.batch_start['train'], self.args.train_iters + 1, self.args.batch_num):  
             self.batch_now['train'] = batch
             wandb_log_dict = {}
 
@@ -417,6 +417,9 @@ class Trainer:
             # exit point
             if batch == self.args.train_iters:
                 break
+            
+            # clear CUDA cache to avoid OOM
+            torch.cuda.empty_cache()
 
             # training process
             self.model.train()

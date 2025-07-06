@@ -35,10 +35,10 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.model = 'NanoGPT'                # NanoGPT, llama
     args.n_position = 1024
     args.n_layer = 10
-    args.n_q_head = 8
-    args.n_kv_head = 8
+    args.n_q_head = 12
+    args.n_kv_head = 12
     args.n_head = args.n_q_head
-    args.n_embed = 512
+    args.n_embed = 768
     args.n_inner = 4 * args.n_embed
     args.dropout = 0.0                  # for pretraining 0 is good, for finetuning try 0.1+
     args.dropout_attn = 0.0             # for pretraining 0 is good, for finetuning try 0.1+
@@ -77,7 +77,7 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     # training setting
     args.batch_size_per_gpu = 32                                            # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
-    args.batch_num = 64 * args.ga_begin
+    args.batch_num = 64 * args.ga_begin                                     # a macro_batch consists of 'batch_num' batches and serves a similar purpose as an 'epoch' in training. It's used for learning rate and weight decay scheduling.
     args.train_iters = 256 * args.batch_num                                 # total batch_num
     args.eval_batch_num = 20
     args.eval_batch_size_per_gpu = 64
@@ -106,7 +106,7 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.use_kvcache = False                    # use kv cache to speed up evaluation          
     args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
     args.compile = False                        # compile the model to speed up training
-    args.eval_interval = args.batch_num * 1     # keep frequent because we'll overfit
+    args.eval_interval = args.batch_num * 2     # keep frequent because we'll overfit
     args.eval_score_interval = args.batch_num * 2
     args.save_interval = args.batch_num * 1   
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
