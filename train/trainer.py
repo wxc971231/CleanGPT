@@ -24,7 +24,7 @@ from model.llama import MyLlama, MyLlamaConfig
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 from utils.utils_model import remove_compiled_prefix
 from utils.utils import set_seed, clean_print
-from eval.eval_score import eval_score_adder, eval_score_multiplier
+from eval.script_score import eval_score_adder, eval_score_multiplier
 
 @dataclass
 class Snapshot:
@@ -194,7 +194,7 @@ class Trainer:
         for data_type, dataset in dataset_dict.items():            
             dataloader = None if dataset is None else \
                 build_dataloader(
-                    self.args, dataset, is_eval=(data_type!='train'), 
+                    self.args, dataset, data_type, 
                     current_batch=self.batch_now[data_type], seed=self.seed
                 )
             dataloader_dict[data_type] = dataloader
@@ -215,7 +215,7 @@ class Trainer:
 
     def _check_MACs(self):
         def _get_dummy_data():
-            dataloader = build_dataloader(self.args, self.dataset_dict['val'], is_eval=True)
+            dataloader = build_dataloader(self.args, self.dataset_dict['val'], dataset_type='val')
             dummy_data = next(dataloader.__iter__())
             dummy_data = [x.to(self.local_rank) for x in dummy_data]
             data, _ = dummy_data[:-1], dummy_data[-1]

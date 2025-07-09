@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: torchrun",
+            "name": "Python: train_ddp",
             "type": "debugpy",
             "request": "launch",
             "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
@@ -16,6 +16,27 @@
                 // "--master_addr=localhost",
                 "--nproc_per_node=gpu",
                 "./train/train_ddp.py"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5",
+                "HF_HOME": "/data1/autoco/TransformerCache",
+                "WANDB_BASE_URL": "https://api.bandw.top"
+            },
+        },
+        {
+            "name": "Python: eval_ddp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
+            // "program": "/data5/weixiaochen/.conda/envs/unico/lib/python3.11/site-packages/torch/distributed/run.py",
+            "args":[
+                "--standalone",
+                // "--master_port=29500",
+                // "--master_addr=localhost",
+                "--nproc_per_node=gpu",
+                "./eval/eval_ddp.py"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,

@@ -8,6 +8,7 @@ import pickle
 import json
 import torch
 import argparse
+from utils.utils import clean_print
 from model.NanoGPT import NanoGPT, NanoGPTConfig
 from model.llama import MyLlama, MyLlamaConfig
 from data.adder.prepare import AdditionTokenizer
@@ -24,6 +25,7 @@ def load_model(out_path=None):
     """ load trained model from out_path """
     # load training config
     config = json.load(open(f"{out_path}/config.json", "r"))
+    local_rank = int(os.environ.get("LOCAL_RANK", default='0'))
 
     # load tokenizer & decoder
     dataset_name = config['dataset']
@@ -79,6 +81,7 @@ def load_model(out_path=None):
     best_ckpt_path = ckpt_files[0]
     ckpt_model_state = torch.load(best_ckpt_path, map_location=f"cuda:0")
     model.load_state_dict(remove_compiled_prefix(ckpt_model_state))
+    clean_print(f"Load {best_ckpt_path}", local_rank, '[Model]')
 
     args = argparse.Namespace(**config)
     return args, model, dataset_name, tokenizer, decoder

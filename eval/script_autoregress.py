@@ -63,6 +63,7 @@ def main():
     model = model.to(device).eval()
 
     # generate text & flow printing
+    print('\n'+'-'* 50 + 'Generating Story' + '-'*50)
     with torch.inference_mode():
         generate_text(model, dataset_name, tokenizer, decoder, prompt, max_length, piece_len, temperature, top_k, device, do_sample)
 

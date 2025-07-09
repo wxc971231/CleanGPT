@@ -44,12 +44,22 @@ def collate_fn(batch, data_path, n_position):
 
     return x, y, idxs            
 
-def build_dataloader(args, dataset:AutoRegressDataset, is_eval:bool=False, current_batch:int=0, seed:int=42):
+def build_dataloader(args, dataset:AutoRegressDataset, dataset_type:str='train', current_batch:int=0, seed:int=42):
     """ Buld DDP dataloader given an input dataset. """
     if dataset is None:
         return None
     
-    batch_size_per_gpu = args.eval_batch_size_per_gpu if is_eval else args.batch_size_per_gpu
+    if dataset_type == 'train':
+        batch_size_per_gpu = args.batch_size_per_gpu
+        batch_num = args.batch_num
+    elif dataset_type == 'val':
+        batch_size_per_gpu = args.eval_batch_size_per_gpu
+        batch_num = args.eval_batch_num
+    elif dataset_type == 'test':
+        batch_size_per_gpu = args.problem_batch_size_per_gpu
+        batch_num = args.problem_batch_num
+    else:
+        raise ValueError(f"dataset_type {dataset_type} not supported")
 
     # The DistributedSampler automatically blocks the data and sends it to each Gpu, which can avoid data overlap
     sampler = MyDistributedSampler(
@@ -59,15 +69,13 @@ def build_dataloader(args, dataset:AutoRegressDataset, is_eval:bool=False, curre
         seed=seed,
         init_batch=current_batch, 
         batch_size_per_gpu=batch_size_per_gpu,
-        batch_num_per_iter=args.eval_batch_num if is_eval else args.batch_num,
+        batch_num_per_iter=batch_num,
         drop_last=False
     )
 
     if args.dataset in ['tinystory', 'shakespeare_char']:
         collate_func = lambda batch: collate_fn(batch, dataset.data_path, dataset.n_position)
-    elif args.dataset == 'adder':
-        collate_func = None
-    elif args.dataset == 'multiplier':
+    elif args.dataset in ['adder', 'multiplier']:
         collate_func = None
     else:
         raise ValueError(f"dataset {args.dataset} not supported")

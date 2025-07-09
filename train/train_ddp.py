@@ -69,13 +69,13 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.wd_begin = 1e-3                        # with baby networks can afford to go a bit higher (1e-4 ~ 1e-2)
     args.wd_end = args.wd_begin                 # For most of situation, keep the weight decay coefficient 'constant' is suitable
     args.wd_decr_style = "constant"            
-    args.ga_begin = 4                           # batch_grad_accum is used to simulate larger batch sizes              
+    args.ga_begin = 1                           # batch_grad_accum is used to simulate larger batch sizes              
     args.ga_end = args.ga_begin                 # with baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x
     args.grad_accum_step_incr_style = "constant"
     args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
 
     # training setting
-    args.batch_size_per_gpu = 32                                            # training batch_size (per GPU)
+    args.batch_size_per_gpu = 256                                           # training batch_size (per GPU)
     args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
     args.batch_num = 64 * args.ga_begin                                     # a macro_batch consists of 'batch_num' batches and serves a similar purpose as an 'epoch' in training. It's used for learning rate and weight decay scheduling.
     args.train_iters = 256 * args.batch_num                                 # total batch_num
@@ -106,20 +106,20 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     args.use_kvcache = False                    # use kv cache to speed up evaluation          
     args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
     args.compile = False                        # compile the model to speed up training
-    args.eval_interval = args.batch_num * 2     # keep frequent because we'll overfit
-    args.eval_score_interval = args.batch_num * 2
+    args.eval_interval = args.batch_num * 4     # keep frequent because we'll overfit
+    args.eval_score_interval = args.batch_num * 4
     args.save_interval = args.batch_num * 1   
     args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
 
     # IO setting
-    args.dataset = 'tinystory'                  # tinystory, shakespeare_char, adder, multiplier
-    args.exp_name = 'TinyStory'
+    # args.dataset = 'tinystory'                  # tinystory, shakespeare_char, adder, multiplier
+    # args.exp_name = 'TinyStory'
     
     # args.dataset = 'shakespeare_char'
     # args.exp_name = 'ShakespeareChar'
 
-    # args.dataset = 'adder'                      
-    # args.exp_name = f'Adder({args.adder_ndigit}_format)' if args.adder_use_format else f'Adder({args.adder_ndigit})'
+    args.dataset = 'adder'                      
+    args.exp_name = f'Adder({args.adder_ndigit}_format)' if args.adder_use_format else f'Adder({args.adder_ndigit})'
     
     # args.dataset = 'multiplier'                  
     # args.exp_name = f'Multiplier({args.multiplier_ndigit}_format)' if args.multiplier_use_format else f'Multiplier({args.multiplier_ndigit})'
