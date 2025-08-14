@@ -1,98 +1,210 @@
-**其他语言: [English](README.md), [中文](README_zh.md).**
-
 # CleanGPT
 
-CleanGPT：一个基于PyTorch实现的[GPT](https://github.com/openai/gpt-2)类模型训练框架。本项目试图保持清晰、简洁、扩展性和教育性，旨在为科研工作提供一个易于使用的工程模板。本项目基于 [NanoGPT](https://github.com/karpathy/nanoGPT) 扩展实现
+**其他语言版本: [English](README.md), [中文](README_zh.md).**
 
+CleanGPT 是一个基于 PyTorch 的清晰、教育性和可扩展的 GPT 风格语言模型训练框架。本项目基于 [NanoGPT](https://github.com/karpathy/nanoGPT) 构建，旨在为研究人员和从业者提供一个结构良好、易于理解的代码库，用于训练基于 Transformer 的语言模型。
 
+## ✨ 特性
 
-## 特性
-1. **分布式训练**：支持基于 PyTorch DDP 的多卡训练框架
-2. **自动混合精度**：支持基于 `torch.cuda.amp` 的混合精度训练
-3. **模型编译加速**：支持利用 `torch.compile` 对模型进行编译优化从而加速训练（要求 Pytorch 2.0 及以上版本）
-4. **轻量数据加载**：利用 `np.memmap` 构造 Dataloader，不需要将全部数据加载到内存
-5. **训练调度器**：提供了强大的训练调度器，支持 learning rate、weight decay coefficient 和训练 batch size 的动态调度，使用早停机制避免过拟合
-6. **断点续训**：支持从最新的 snapshot 无感恢复训练过程
-7. **模型管理**：提供了实用的 checkpoint 保存管理机制，可根据设定自动保存最好（即验证损失最低）的n个模型权重，且可从指定 checkpoint 初始化进行微调
-8. **Wandb Log**：支持在 [Wandb](https://wandb.ai/site) 实时记录训练损失、验证损失、学习率、数据集访问比例等数据曲线
-9. **Macro Batch**：由于 Lanuage Model 训练往往使用非常大的数集，整个训练过程可能只遍历数据集几次，甚至无法完整遍历一次，传统的 epoch 概念不再适用。本项目基于 macro-batch 概念进行训练，具体地，batch 是加载数据的最小单位，若干个 batch 组成一个 macro-batch，作为验证损失评估、snapshot & checkpoint 保存的单位
-10. **GPT2**: 支持加载 HuggingFace GPT-2 checkpoints 作为初始模型进行微调
+### 🚀 训练基础设施
+- **分布式训练**: 基于 PyTorch DDP 的多 GPU 训练支持
+- **自动混合精度**: 使用 `torch.cuda.amp` 进行内存高效训练
+- **模型编译**: 使用 `torch.compile` 加速训练 (PyTorch 2.0+)
+- **断点续训**: 从快照无缝恢复训练
+- **早停机制**: 自动防止过拟合
 
-## 部署指南
-1. 安装 Python 3.9 及以上版本
-2. 克隆项目
-    ```shell
-    git clone https://github.com/wxc971231/CleanGPT.git
-    cd CleanGPT
-    ```
-3. 安装 Pytorch：根据你的 CUDA 版本，在[官网](https://pytorch.org/get-started/previous-versions/)找到安装命令。推荐安装 Pytorch 2.0.1 及以上版本
-4. 安装依赖
-    ```shell
-    pip install -r requirements.txt
-    ```
+### 📊 高级调度
+- **动态学习率**: 余弦/线性衰减与预热
+- **权重衰减调度**: 自适应正则化
+- **梯度累积**: 动态批次大小缩放
+- **宏批次训练**: 高效的大规模数据集处理
 
-## 训练示例
-1. 构造数据集
-    ```shell
-    cd data/shakespeare_char
-    python prepare.py
-    ```
-2. 在 `train/train_ddp.py` 中的 `get_args_ready` 方法中设置超参数，形如
-    ```python
-    def get_args_ready(WORLD_SIZE:int, RANK:int):
-        args = parse_args()
-        args.world_size = WORLD_SIZE
+### 🔧 模型支持
+- **NanoGPT**: 轻量级 GPT 实现
+- **Llama 架构**: 使用 RMSNorm 和 SwiGLU 的现代 Transformer
+- **灵活配置**: 简单的模型架构自定义
 
-        # model setting
+### 📈 监控与管理
+- **Wandb 集成**: 实时训练指标可视化
+- **检查点管理**: 自动保存最佳模型
+- **内存高效数据加载**: 使用 `np.memmap` 处理大型数据集
+- **全面评估**: 数学任务的内置评分
+
+## 🗂️ 项目结构
+
+```
+CleanGPT/
+├── configs/                # 实验配置
+│   ├── base.py                # 基础配置类
+│   ├── shakespeare.py         # 莎士比亚数据集配置
+│   ├── mathAdder.py           # 加法任务配置
+│   ├── mathMulitplier.py      # 乘法任务配置
+│   └── tinystory.py           # TinyStory 数据集配置
+├── data/                   # 数据集准备和加载
+│   ├── data.py                # 核心数据加载工具
+│   ├── shakespeare_char/      # 字符级莎士比亚数据
+│   ├── adder/                 # 数学加法数据集
+│   ├── multiplier/            # 数学乘法数据集
+│   └── tinystory/             # TinyStory 数据集
+├── model/                  # 模型架构
+│   ├── NanoGPT.py             # GPT 实现
+│   └── llama.py               # Llama 架构
+├── train/                  # 训练基础设施
+│   ├── trainer.py             # 主要训练逻辑
+│   ├── train_ddp.py           # 分布式训练入口
+│   ├── scheduler.py           # 学习率和参数调度
+│   └── config.py              # 命令行参数解析
+├── eval/                   # 评估和测试
+│   ├── evaluater.py           # 模型评估框架
+│   ├── eval_ddp.py            # 分布式评估
+│   └── script_score.py        # 任务特定评分
+└── utils/                  # 工具函数
+    ├── utils.py               # 通用工具
+    └── utils_model.py         # 模型特定工具
+```
+
+## 🚀 快速开始
+
+### 安装
+
+1. **克隆仓库**
+   ```bash
+   git clone https://github.com/wxc971231/CleanGPT.git
+   cd CleanGPT
+   ```
+
+2. **安装 PyTorch**
+   
+   根据您的 CUDA 版本从[官方网站](https://pytorch.org/get-started/previous-versions/)安装 PyTorch。推荐使用 PyTorch 2.0+ 以获得模型编译功能。
+
+3. **安装依赖**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### 训练示例
+
+#### 1. 莎士比亚字符级模型
+
+```bash
+# 准备数据集
+cd data/shakespeare_char
+python prepare.py
+cd ../..
+
+# 训练模型
+torchrun --standalone --nproc_per_node=1 train/train_ddp.py
+```
+
+#### 2. 数学加法任务
+
+```bash
+# 准备数据集
+cd data/adder
+python prepare.py
+cd ../..
+
+# 训练模型 (在 train_ddp.py 中修改 experiment_name 为 'Adder_NanoGPT')
+torchrun --standalone --nproc_per_node=1 train/train_ddp.py
+```
+
+#### 3. 多 GPU 训练
+
+```bash
+# 在 4 个 GPU 上训练
+torchrun --standalone --nproc_per_node=4 train/train_ddp.py
+```
+
+## 📋 支持的数据集
+
+| 数据集 | 描述 | 任务类型 | 词汇表大小 |
+|--------|------|----------|------------|
+| **Shakespeare** | 莎士比亚作品的字符级文本 | 语言建模 | ~65 |
+| **TinyStory** | 儿童故事数据集 | 语言建模 | ~32K |
+| **数学加法** | N 位数加法问题 | 数学计算 | 10-13 |
+| **数学乘法** | N 位数乘法问题 | 数学计算 | 10-13 |
+
+## ⚙️ 配置系统
+
+CleanGPT 使用灵活的配置系统，支持实验特定设置：
+
+```python
+# 示例：莎士比亚配置
+class ShakespeareNanoGPTConfig(BaseExperimentConfig):
+    def get_args_ready(self):
+        args = self.get_base_args()
+        
+        # 模型设置
         args.model = 'NanoGPT'
-        args.n_position = 1024
-        args.n_layer = 6
-        args.n_head = 4
-        args.n_embed = 384
-        args.n_inner = 4 * args.n_embed
-        args.dropout = 0.0                          
-        args.init_from = None                       
+        args.n_position = 256
+        args.n_layer = 4
+        args.n_head = 8
+        args.n_embed = 256
+        
+        # 训练设置
+        args.lr_max = 1e-3
+        args.batch_size_per_gpu = 32
+        args.train_iters = 5000
+        
+        return args
+```
 
-        # optimizer setting
-        args.lr_begin = 0                                       
-        args.lr_max = 1e-3                          
-        args.lr_decay_factor = 10.0                 
-        args.lr_warmup_ratio = 0.05
-        args.lr_decay_ratio = 0.95
-        args.lr_decay_style = "cosine"
-        args.wd_begin = 1e-3                        
-        args.wd_end = args.wd_begin                 
-        args.wd_decr_style = "constant"            
-        args.ga_begin = 2                           
-        args.ga_end = args.ga_begin                 
-        args.ga_incr_style = "constant"
-        args.adam_beta2 = 0.99                      
-        ...
-    ```
-    所有超参数的详细解释可在 `train/config.py` 中找到。相比通过命令行传入参数，这样显式固定训练超参数更加清晰，且可通过保存训练脚本保证可复现性
-3. 启动训练，目前仅支持单机多卡并行。Checkpoint & Snapshot 将保存于 `out` 路径下
-    ```shell
-    CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=gpu ./train/train_ddp.py 
-    ```
-    通常我们会训练到过拟合，直到触发早停
-    ![](img/train_log.png)
-4. 评估最优 Checkpoint。将训练过程中生成的输出文件路径粘贴到 `eval/text_autoregress.py` 中，会自动加载最优 Checkpoint 进行自回归生成。用 TinyStory 数据集训练的一个示例如下：
-    ```text
-    Once upon a time, 3 year old girl named Lucy wanted to go on an adventure. She asked her mom if she could go. Her mom said yes, but only if she stayed close.
-    Lucy was so excited! She ran outside and started exploring. She found a big tree and decided to climb it. She climbed higher and higher until she was at the top.
-    At the top, Lucy looked around and saw a beautiful view. She wanted to stay and enjoy it for a while. Then she carefully climbed down and ran back home.
-    When she got home, her mom asked her what she was doing. Lucy said, "I'm going on an adventure!" Her mom smiled and said, "That sounds like a great idea!"
-    Lucy was so happy. She had a wonderful time exploring and eating the view. She was so glad she had stayed close to home.</s>
-    ```
+## 📊 监控和评估
 
+### Wandb 集成
 
-## TODO
+训练指标自动记录到 Wandb：
+- 训练/验证损失
+- 学习率调度
+- 模型参数
+- 数据集覆盖率
 
-| Item  | Note  |
-|-------|-----|
-| 支持混合数据集训练 | -  |
-| 支持 llama 模型 | Done (hugging face llama)  | 
-| 支持 kvcahce | Done (for llama) |
-| 支持 RLHF | - |
-| 支持多模态输入|-|
-| 将本项目扩展至类似 [Gato](https://arxiv.org/pdf/2205.06175) 的控制任务|-|
+### 数学任务评估
+
+对于加法和乘法任务，框架包含专门的评估：
+
+```python
+# 自动准确率计算
+accuracy = eval_score_adder(model, dataset, tokenizer)
+print(f"加法准确率: {accuracy:.2%}")
+```
+
+## 🔧 高级特性
+
+### 动态参数调度
+
+```python
+# 带预热和余弦衰减的学习率
+args.lr_warmup_ratio = 0.05
+args.lr_decay_ratio = 0.95
+args.lr_decay_style = "cosine"
+
+# 动态梯度累积
+args.ga_begin = 4
+args.ga_end = 16
+args.ga_incr_style = "linear"
+```
+
+### 内存高效数据加载
+
+```python
+# 使用内存映射加载大型数据集
+data = np.load(data_path, mmap_mode='r')
+# 无需将整个数据集加载到内存
+```
+
+### 模型编译 (PyTorch 2.0+)
+
+```python
+# 自动模型编译以加速
+if args.compile:
+    model = torch.compile(model)
+```
+
+## 📈 性能优化建议
+
+1. **使用混合精度**: 启用 `--use-amp` 提高内存效率
+2. **优化批次大小**: 使用梯度累积实现有效的大批次
+3. **启用编译**: 在 PyTorch 2.0+ 中使用 `--compile`
+4. **多 GPU 训练**: 使用 DDP 扩展到多个 GPU
+5. **内存映射**: 对于大于 RAM 的数据集很高效
