@@ -207,7 +207,7 @@ class Trainer:
             print(f"> vocab_size:             {self.args.vocab_size}")
             print(f"> Train Dataset Size:     {len(dataset_dict['train'])}")
             print(f"> Train sample all:       {train_sample_all}")
-            print(f"> Train batch_size:       {train_batch_size_begin} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_begin}) ---{self.args.grad_accum_step_incr_style}---> {train_batch_size_end} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_end})")
+            print(f"> Train batch_size:       {train_batch_size_begin} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_begin}) ---{self.args.ga_incr_style}---> {train_batch_size_end} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_end})")
             print(f"> Val Dataset size:       {len(dataset_dict['val'])}")
             print(f"> Val/Eval batch_size:    {self.args.eval_batch_size} ({self.args.eval_batch_size_per_gpu}*{self.world_size})")
             print('-'*50 + '\n')
@@ -401,7 +401,7 @@ class Trainer:
                     wandb_log_dict.update({f"{self.args.dataset}/val_loss": val_loss})                    
 
             # Evaluate policy performance at specified batch intervals
-            if (batch % self.args.eval_score_interval == 0 or batch == self.args.train_iters) and (batch != 0 or not self.args.skip_first_eval):
+            if hasattr(self.args, 'eval_score_interval') and (batch % self.args.eval_score_interval == 0 or batch == self.args.train_iters) and (batch != 0 or not self.args.skip_first_eval):
                 self.model.eval()
                 with torch.inference_mode():  
                     for setting, eval_func in self.eval_setting.items():

@@ -5,15 +5,13 @@ sys.path.append(base_path)
 
 import torch
 import pickle
-import numpy as np
 from torch.distributed import init_process_group, destroy_process_group
-from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist
 from eval.config import parse_args
 from utils.utils_model import load_model
 from eval.evaluater import Evaluater
 from data.data import AutoRegressDataset, AdditionDataset, AdditionTokenizer, MultiplicationDataset, MultiplicationTokenizer
 import setproctitle
-setproctitle.setproctitle("ClenGPT@Debug")
+setproctitle.setproctitle("CleanGPT@Debug")
 
 def ddp_setup():
     num_cores = os.cpu_count()
@@ -34,7 +32,7 @@ def get_args_ready(WORLD_SIZE:int, RANK:int):
     # eval_args.out_path = f'{base_path}/out/TinyStory_NanoGPT_1024_512_8_10'
     # eval_args.out_path = f'{base_path}/out/Multiplier(3_format)_llama_1024_512_8_10'          # dataset name
     # eval_args.out_path = f'{base_path}/out/Multiplier(3_format)_NanoGPT_1024_768_12_10'
-    eval_args.out_path = f'{base_path}/out/Adder(3_format)_NanoGPT_1024_768_12_10'
+    eval_args.out_path = f'{base_path}/out/Adder(3_format)/Adder(3_format)_NanoGPT_1024_256_8_4/20250814_101733'
     
     # training setting
     eval_args.batch_size_per_gpu = 256                                           # training batch_size (per GPU)

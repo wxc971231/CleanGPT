@@ -15,7 +15,7 @@ def parse_args():
 def get_parser_for_basic_args():
     parser = ArgumentParser("Basic Configuration")
     parser.add_argument(
-        "--seeds", type=int, nargs='+', default=[42, 43, 44], 
+        "--seeds", type=int, nargs='+', default=[42,], 
         help="Random seed for numpy/torch"
     )
     parser.add_argument(
@@ -127,8 +127,12 @@ def _add_model_args(parser):
         help="RMS Norm epsilon, special for llama.",
     )
     group.add_argument(
-        "--dropout", type=float, default=0.2,
+        "--dropout", type=float, default=0.05,
         help="The general dropout probability.",
+    )
+    group.add_argument(
+        "--dropout-attn", type=float, default=0.05,
+        help="The general dropout probability for attention layer.",
     )
     group.add_argument(
         "--weight-tying", type=str2bool, default=True,
@@ -172,10 +176,6 @@ def _add_training_args(parser):
     group.add_argument(
         "--batch-size-per-gpu", type=int, default=64,
         help="Training batch size (per GPU)."
-    )
-    group.add_argument(
-        "--batch-grad-accum-step", type=int, default=1, 
-        help="Batch step of Gradient Accumulation."
     )
     group.add_argument(
         "--batch-size", type=int, default=64,
@@ -287,7 +287,7 @@ def _add_scheduler_args(parser):
 
     # grad accum step setting
     group.add_argument(
-        "--grad-accum-step-incr-style", type=str, default="constant", 
+        "--ga-incr-style", type=str, default="constant", 
         choices=["constant", "linear", "power"],
         help="grad accum step incr function."
         "With baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x"

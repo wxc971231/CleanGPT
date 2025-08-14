@@ -79,7 +79,7 @@ class Evaluater:
             print(f"> vocab_size:             {self.args.vocab_size}")
             print(f"> Train Dataset Size:     {len(dataset_dict['train'])}")
             print(f"> Train sample all:       {train_sample_all}")
-            print(f"> Train batch_size:       {train_batch_size_begin} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_begin}) ---{self.args.grad_accum_step_incr_style}---> {train_batch_size_end} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_end})")
+            print(f"> Train batch_size:       {train_batch_size_begin} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_begin}) ---{self.args.ga_incr_style}---> {train_batch_size_end} ({self.args.batch_size_per_gpu}*{self.world_size}*{self.args.ga_end})")
             print(f"> Val Dataset size:       {len(dataset_dict['val'])}")
             print(f"> Val/Eval batch_size:    {self.args.eval_batch_size} ({self.args.eval_batch_size_per_gpu}*{self.world_size})")
             print('-'*50 + '\n')

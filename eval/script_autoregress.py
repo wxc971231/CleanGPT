@@ -50,11 +50,11 @@ def main():
     # max_length = 1000
 
     device = 'cuda:0'
-    out_path = f"{base_path}/out/TinyStory_llama_1024_512_8_10"
+    out_path = f"{base_path}/out/TinyStory/TinyStory_llama_1024_512_12_10/20250814_102621"
     prompt = "Once upon a time, "
-    temperature = 0.1
+    temperature = 0.2
     top_k = None
-    do_sample = False
+    do_sample = True    # 启用随机采样
     piece_len = 20
     max_length = 1000
 

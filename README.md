@@ -63,7 +63,7 @@ CleanGPT: A training framework for GPT-style model implemented with PyTorch. Cle
         args.wd_decr_style = "constant"            
         args.ga_begin = 2                           
         args.ga_end = args.ga_begin                 
-        args.grad_accum_step_incr_style = "constant"
+        args.ga_incr_style = "constant"
         args.adam_beta2 = 0.99                      
         ...
     ```

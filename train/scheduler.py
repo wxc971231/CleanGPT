@@ -136,7 +136,7 @@ class OptimizerParamScheduler(object):
         self.wd_scheduler = ParamScheduler(wd_schedule_config, total_steps=args.train_iters)
 
         # grad accum step parameters
-        self.ga_incr_style = args.grad_accum_step_incr_style
+        self.ga_incr_style = args.ga_incr_style
         self.ga_begin = int(args.ga_begin)
         self.ga_end = int(args.ga_end)
         assert 0.0 <= self.ga_begin <= self.ga_end
@@ -180,7 +180,7 @@ class OptimizerParamScheduler(object):
             "ga_begin": self.ga_scheduler.config.begin,
             "ga_end": self.ga_scheduler.config.end,
             "ga_incr_steps": self.ga_scheduler.schedule_steps,
-            "grad_accum_step_incr_style": self.ga_scheduler.config.schedule_style,
+            "ga_incr_style": self.ga_scheduler.config.schedule_style,
         }
         return state_dict
 
@@ -237,7 +237,7 @@ class OptimizerParamScheduler(object):
             self.ga_begin = self._check_and_set(self.ga_begin, sd["ga_begin"], "initial grad accum step")
             self.ga_end = self._check_and_set(self.ga_end, sd["ga_end"], "final grad accum step")
             self.ga_incr_steps = self._check_and_set(self.ga_incr_steps, sd["ga_incr_steps"], "total number of grad incr iterations",)
-            self.ga_incr_style = self._check_and_set(self.ga_incr_style, sd["grad_accum_step_incr_style"], "grad accum step incr style")
+            self.ga_incr_style = self._check_and_set(self.ga_incr_style, sd["ga_incr_style"], "grad accum step incr style")
             ga_schedule_config = ScheduleConfig(
                 begin=self.ga_begin,
                 middle=self.ga_begin,
@@ -273,7 +273,7 @@ if __name__ == "__main__":
             self.wd_decr_style = 'cosine'
             self.wd_begin = 0.01
             self.wd_end = 0.001
-            self.grad_accum_step_incr_style = 'power'
+            self.ga_incr_style = 'power'
             self.ga_begin = 1
             self.ga_end = 20
 

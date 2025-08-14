@@ -10,12 +10,13 @@ import pickle
 import torch
 from torch.distributed import init_process_group, destroy_process_group
 
-from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist
+from datetime import datetime
+from utils.utils import create_folder_if_not_exist, create_folder_overwrite_if_exist, clean_print
 from data.data import AutoRegressDataset, AdditionDataset, AdditionTokenizer, MultiplicationDataset, MultiplicationTokenizer
-from train.config import parse_args
 from train.trainer import Trainer
+from configs import get_experiment_config
 import setproctitle
-setproctitle.setproctitle("ClenGPT@Debug")
+setproctitle.setproctitle("CleanGPT@Debug")
 
 def ddp_setup():
     num_cores = os.cpu_count()
@@ -26,114 +27,15 @@ def ddp_setup():
     init_process_group(backend="nccl")              # nccl for linux, gloo for windows
     torch.cuda.set_device(int(os.environ.get("RANK", default='0')))
 
-def get_args_ready(WORLD_SIZE:int, RANK:int):
+def get_args_ready(experiment_name:str, RANK:int):
     ''' train a miniature character-level shakespeare model, good for debugging and playing on macbooks and such '''
-    args = parse_args()
-    args.world_size = WORLD_SIZE
-
-    # model setting
-    args.model = 'NanoGPT'                # NanoGPT, llama
-    args.n_position = 1024
-    args.n_layer = 10
-    args.n_q_head = 12
-    args.n_kv_head = 12
-    args.n_head = args.n_q_head
-    args.n_embed = 768
-    args.n_inner = 4 * args.n_embed
-    args.dropout = 0.0                  # for pretraining 0 is good, for finetuning try 0.1+
-    args.dropout_attn = 0.0             # for pretraining 0 is good, for finetuning try 0.1+
-    args.init_from = None               # training from scratch or resuming from latest snapshot within out-dir
-
-    # data setting
-    args.math_vocab = {'=': 10, '+': 11, 'x': 12, }     # digits num for adder and multiplier dataset
-    args.adder_ndigit = 3                               # digits num for adder dataset
-    args.multiplier_ndigit = args.adder_ndigit          # digits num for multiplier dataset
-    args.adder_use_format = True
-    args.multiplier_use_format = True
-    args.adder_format_vocab = None if not args.adder_use_format else {
-        '=': args.math_vocab['='], 
-        '+': args.math_vocab['+']
-    }  
-    args.multiplier_format_vocab = None if not args.multiplier_use_format else {
-        '=': args.math_vocab['='], 
-        'x': args.math_vocab['x']
-    }
+    args = get_experiment_config(experiment_name)
+    clean_print(f'Exp Profile: {args.exp_profile}', RANK, '[Trainer]')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    args.out_dir = f'{base_path}/out/{args.exp_name}/{args.exp_profile}/{timestamp}'
     
-    # optimizer setting
-    args.lr_begin = 0                                       
-    args.lr_max = 1e-3                          # with baby networks can afford to go a bit higher
-    args.lr_decay_factor = 10.0                 # min learning rate equals to (learning_rate / 10) usually
-    args.lr_warmup_ratio = 0.05
-    args.lr_decay_ratio = 0.95
-    args.lr_decay_style = "cosine"
-    args.wd_begin = 1e-3                        # with baby networks can afford to go a bit higher (1e-4 ~ 1e-2)
-    args.wd_end = args.wd_begin                 # For most of situation, keep the weight decay coefficient 'constant' is suitable
-    args.wd_decr_style = "constant"            
-    args.ga_begin = 1                           # batch_grad_accum is used to simulate larger batch sizes              
-    args.ga_end = args.ga_begin                 # with baby networks we can simply use 'constant' grad_accum_step, but for large networks sometimes increase to 2x~10x
-    args.grad_accum_step_incr_style = "constant"
-    args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
-
-    # training setting
-    args.batch_size_per_gpu = 256                                           # training batch_size (per GPU)
-    args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
-    args.batch_num = 64 * args.ga_begin                                     # a macro_batch consists of 'batch_num' batches and serves a similar purpose as an 'epoch' in training. It's used for learning rate and weight decay scheduling.
-    args.train_iters = 256 * args.batch_num                                 # total batch_num
-    args.eval_batch_num = 20
-    args.eval_batch_size_per_gpu = 64
-    args.eval_batch_size = args.eval_batch_size_per_gpu * WORLD_SIZE
-    args.problem_batch_num = 2
-    args.resample_times = 8
-    args.problem_batch_size_per_gpu = 64      # eval problem batch_size (per GPU)
-    args.total_problem_num = args.problem_batch_size_per_gpu * WORLD_SIZE * args.problem_batch_num
-    args.early_stopping_patience = 6
-    args.early_stopping_delta = 0
-    args.clip_grad = 1.0                        # clip gradients at this value, or disable if == 0.0
-    args.num_workers = 0                        # dataloader workers
-
-    # ctrl setting, which are usually changed
-    args.seeds = [42, ]                         # random seeds
-    args.weight_tying = True                    # tie the word embedding and softmax weights, like in GPT-2
-    args.add_bias = False                       # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    args.override_opt_param_scheduler = True   # Set 'True' to override all scheduler setting, otherwise the scheduler will be set by checkpoint
-    args.skip_first_eval = False                # skip the first evaluation to at batch 0
-    args.wandb = True                           # use wandb to log training info
-    args.use_early_stopping = True              # use the early stopping mechanism to aviod overfitting
-    args.save_ckpt = True                       # update ckpt by save_interval and save_strategy
-    args.save_ckpt_num = 3                      # the number of ckpt to save, 0 for saving all ckpt
-    args.save_snapshot = True                   # save the latest traing snapshot, from which we can resume training 
-    args.save_strategy = 'best'                 # 'best' or 'interval'
-    args.use_kvcache = False                    # use kv cache to speed up evaluation          
-    args.use_amp = False                        # use automatic mixed precision (AMP) to speed up training, which may hurt the performance
-    args.compile = False                        # compile the model to speed up training
-    args.eval_interval = args.batch_num * 4     # keep frequent because we'll overfit
-    args.eval_score_interval = args.batch_num * 4
-    args.save_interval = args.batch_num * 1   
-    args.compile = args.compile and torch.__version__ >= "2.0"  # only support torch 2.0+
-
-    # IO setting
-    # args.dataset = 'tinystory'                  # tinystory, shakespeare_char, adder, multiplier
-    # args.exp_name = 'TinyStory'
-    
-    # args.dataset = 'shakespeare_char'
-    # args.exp_name = 'ShakespeareChar'
-
-    args.dataset = 'adder'                      
-    args.exp_name = f'Adder({args.adder_ndigit}_format)' if args.adder_use_format else f'Adder({args.adder_ndigit})'
-    
-    # args.dataset = 'multiplier'                  
-    # args.exp_name = f'Multiplier({args.multiplier_ndigit}_format)' if args.multiplier_use_format else f'Multiplier({args.multiplier_ndigit})'
-    
-    # args.exp_name = 'Debug'
-    args.wandb_project = 'CleanGPT'
-    args.exp_profile = f'{args.exp_name}_{args.model}_{args.n_position}_{args.n_embed}_{args.n_head}_{args.n_layer}'
-    args.exp_profile = f'{args.exp_profile}_compiled' if args.compile else args.exp_profile
-    args.exp_profile = f'{args.exp_profile}_ampd' if args.use_amp else args.exp_profile
-    args.out_dir = f'{base_path}/out/{args.exp_profile}'
-
     # assert some hyper paras
     assert args.dataset in ['tinystory', 'shakespeare_char', 'adder', 'multiplier'], f"dataset {args.dataset} not supported"
-    assert args.train_iters % args.batch_grad_accum_step == 0
     assert args.train_iters % args.eval_interval == 0
     assert args.train_iters % args.save_interval == 0
 
@@ -205,7 +107,8 @@ if __name__ == "__main__":
     torch.backends.cudnn.allow_tf32 = True 
     
     # get hyper paras ready
-    args = get_args_ready(WORLD_SIZE, RANK)
+    experiment_name = 'TinyStory_Llama'
+    args = get_args_ready(experiment_name, RANK)
 
     # build training objs
     dataset_dict, tokenizer = load_dataset(args)

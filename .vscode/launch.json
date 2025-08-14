@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5",
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3",
                 "HF_HOME": "/data1/autoco/TransformerCache",
                 "WANDB_BASE_URL": "https://api.bandw.top"
             },

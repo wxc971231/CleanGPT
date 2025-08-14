@@ -65,7 +65,7 @@ CleanGPT：一个基于PyTorch实现的[GPT](https://github.com/openai/gpt-2)类
         args.wd_decr_style = "constant"            
         args.ga_begin = 2                           
         args.ga_end = args.ga_begin                 
-        args.grad_accum_step_incr_style = "constant"
+        args.ga_incr_style = "constant"
         args.adam_beta2 = 0.99                      
         ...
     ```
