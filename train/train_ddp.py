@@ -21,11 +21,34 @@ setproctitle.setproctitle("CleanGPT@Debug")
 def ddp_setup():
     num_cores = os.cpu_count()
     num_threads = max(1, min(4, num_cores // 4))    # Each process uses part of the CPU cores
-    os.environ["OMP_NUM_THREADS"] = str(num_threads)
-    os.environ["MASTER_ADDR"] = "localhost"         # localhost for single node
-    os.environ["MASTER_PORT"] = "21662"             # Any free port
-    init_process_group(backend="nccl")              # nccl for linux, gloo for windows
-    torch.cuda.set_device(int(os.environ.get("RANK", default='0')))
+    os.environ.setdefault("OMP_NUM_THREADS", str(num_threads))
+
+    # Prefer IP to avoid DNS resolution issues; only set if not already provided by torchrun
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "21662")
+
+    # Choose proper backend: nccl on linux with GPU, otherwise gloo
+    backend = "nccl" if torch.cuda.is_available() and sys.platform.startswith("linux") else "gloo"
+    
+    # Hint socket interface for single-node runs to suppress hostname resolution warnings
+    if backend == "nccl":
+        os.environ.setdefault("NCCL_SOCKET_IFNAME", "lo")
+        os.environ.setdefault("NCCL_IB_DISABLE", "1")  # disable InfiniBand if not present
+    else:
+        os.environ.setdefault("GLOO_SOCKET_IFNAME", "lo")
+
+    # Use LOCAL_RANK if available (set by torchrun), fallback to RANK
+    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+
+    # Initialize process group with explicit device_id to avoid barrier() warning
+    # Older PyTorch may not support device_id; gracefully fallback
+    try:
+        init_process_group(backend=backend, device_id=local_rank)
+    except TypeError:
+        init_process_group(backend=backend)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+
 
 def get_args_ready(experiment_name:str, RANK:int):
     ''' train a miniature character-level shakespeare model, good for debugging and playing on macbooks and such '''
@@ -82,6 +105,7 @@ def load_dataset(args):
     dataset_dict = {'train': dataset_train, 'val': dataset_val, 'test': dataset_test}
     return dataset_dict, tokenizer
 
+
 def save_setting(args):
     if (args.save_ckpt or args.save_snapshot) and RANK == 0:
         # create floder to save ckpts and hyperparas if we need
@@ -103,12 +127,35 @@ if __name__ == "__main__":
     RANK = int(os.environ.get("RANK", default='0'))
 
     # activate tf32 on matmul and cudnn to boost NVIDIA Ampere GPU performance
-    torch.backends.cuda.matmul.allow_tf32 = True 
-    torch.backends.cudnn.allow_tf32 = True 
+    # (Old API, will be deprecated in PyTorch >= 2.9)
+    # torch.backends.cuda.matmul.allow_tf32 = True 
+    # torch.backends.cudnn.allow_tf32 = True 
+    
+    # Prefer new TF32 control APIs (PyTorch >= 2.9) with fallback for older versions
+    try:
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch.backends.cudnn.fp32_precision = "tf32"
+    except Exception:
+        # Fallback for older torch: use deprecated allow_tf32 flags if present
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+        except Exception:
+            pass
+        try:
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
     
     # get hyper paras ready
     experiment_name = 'TinyStory_Llama'
     args = get_args_ready(experiment_name, RANK)
+
+    # custom setting
+    args.wandb_project = 'CleanGPT'
+    args.wandb = False
+    args.init_from = None
+    # args.out_dir = '/home/pc5090/Code/github/CleanGPT/out/TinyStory/TinyStory_llama_1024_512_12_10/20251023_215406'
+    start_timestep = args.out_dir[args.out_dir.rfind('/')+1:]
 
     # build training objs
     dataset_dict, tokenizer = load_dataset(args)
@@ -132,7 +179,7 @@ if __name__ == "__main__":
             with wandb.init(
                 project=args.wandb_project,
                 group = args.exp_profile,
-                name = f"seed_{seed}",
+                name = start_timestep,
                 id = trianer.wandb_id,
                 resume = 'allow',
                 dir = f'{base_path}/Wandb',

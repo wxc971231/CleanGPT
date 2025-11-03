@@ -8,8 +8,8 @@
             "name": "Python: train_ddp",
             "type": "debugpy",
             "request": "launch",
-            "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
-            // "program": "/data5/weixiaochen/.conda/envs/unico/lib/python3.11/site-packages/torch/distributed/run.py",
+            // "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
+            "program": "/root/miniconda3/envs/CleanGPT/lib/python3.11/site-packages/torch/distributed/run.py",
             "args":[
                 "--standalone",
                 // "--master_port=29500",
@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+                "CUDA_VISIBLE_DEVICES": "0,",
                 "HF_HOME": "/data1/autoco/TransformerCache",
                 "WANDB_BASE_URL": "https://api.bandw.top"
             },
@@ -29,8 +29,8 @@
             "name": "Python: eval_ddp",
             "type": "debugpy",
             "request": "launch",
-            "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
-            // "program": "/data5/weixiaochen/.conda/envs/unico/lib/python3.11/site-packages/torch/distributed/run.py",
+            // "program": "/data1/autoco/anaconda3/envs/unico/lib/python3.10/site-packages/torch/distributed/run.py",
+            "program": "/root/miniconda3/envs/CleanGPT/lib/python3.11/site-packages/torch/distributed/run.py",
             "args":[
                 "--standalone",
                 // "--master_port=29500",
@@ -41,7 +41,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5",
+                "CUDA_VISIBLE_DEVICES": "0,",
                 "HF_HOME": "/data1/autoco/TransformerCache",
                 "WANDB_BASE_URL": "https://api.bandw.top"
             },

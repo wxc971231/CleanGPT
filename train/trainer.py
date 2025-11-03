@@ -67,15 +67,39 @@ class Trainer:
         # data stuff
         self.dataloader_dict = self._prepare_dataloader(dataset_dict)       
 
-        # AMP setting
+        # AMP setting (version-safe)
         if args.use_amp:        
             amp_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
             device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
-            self.ctx = torch.amp.autocast(device_type=device_type, dtype=amp_dtype)
-            self.scaler = torch.cuda.amp.GradScaler(enabled=(amp_dtype==torch.float16)) # bfloat16 doesn't need GradScaler cause it can be calculated in hardware drictly   
+            # Prefer torch.amp APIs; fallback to torch.cuda.amp on older torch
+            try:
+                self.ctx = torch.amp.autocast(device_type=device_type, dtype=amp_dtype)
+                self.scaler = torch.amp.GradScaler(enabled=(amp_dtype==torch.float16))  # bf16 doesn't need GradScaler
+            except Exception:
+                if device_type == 'cuda':
+                    from torch.cuda.amp import autocast as cuda_autocast
+                    from torch.cuda.amp import GradScaler as CudaGradScaler
+                    self.ctx = cuda_autocast(dtype=amp_dtype)
+                    self.scaler = CudaGradScaler(enabled=(amp_dtype==torch.float16))
+                else:
+                    # CPU path: autocast may be unavailable in older versions
+                    self.ctx = nullcontext()
+                    try:
+                        from torch.cuda.amp import GradScaler as CudaGradScaler
+                        self.scaler = CudaGradScaler(enabled=False)
+                    except Exception:
+                        self.scaler = None
         else:
-            self.ctx = nullcontext()                                                    # null context
-            self.scaler = torch.cuda.amp.GradScaler(enabled=False)                      # no-op
+            self.ctx = nullcontext()                                                # null context
+            # No-op scaler; prefer torch.amp, fallback to torch.cuda.amp
+            try:
+                self.scaler = torch.amp.GradScaler(enabled=False)
+            except Exception:
+                try:
+                    from torch.cuda.amp import GradScaler as CudaGradScaler
+                    self.scaler = CudaGradScaler(enabled=False)
+                except Exception:
+                    self.scaler = None
 
         # eval setting
         self.eval_setting = {}
