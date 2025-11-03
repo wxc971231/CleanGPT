@@ -125,23 +125,15 @@ if __name__ == "__main__":
     ddp_setup()
     WORLD_SIZE = int(os.environ.get("WORLD_SIZE", default='1'))
     RANK = int(os.environ.get("RANK", default='0'))
-
-    # activate tf32 on matmul and cudnn to boost NVIDIA Ampere GPU performance
-    # (Old API, will be deprecated in PyTorch >= 2.9)
-    # torch.backends.cuda.matmul.allow_tf32 = True 
-    # torch.backends.cudnn.allow_tf32 = True 
     
-    # Prefer new TF32 control APIs (PyTorch >= 2.9) with fallback for older versions
     try:
+        # Prefer new TF32 control APIs (PyTorch >= 2.9) with fallback for older versions
         torch.backends.cuda.matmul.fp32_precision = "tf32"
         torch.backends.cudnn.fp32_precision = "tf32"
     except Exception:
         # Fallback for older torch: use deprecated allow_tf32 flags if present
         try:
             torch.backends.cuda.matmul.allow_tf32 = True
-        except Exception:
-            pass
-        try:
             torch.backends.cudnn.allow_tf32 = True
         except Exception:
             pass
@@ -153,6 +145,8 @@ if __name__ == "__main__":
     # custom setting
     args.wandb_project = 'CleanGPT'
     args.wandb = False
+    args.save_snapshot = False                  # save the latest traing snapshot, from which we can resume training 
+    args.save_ckpt = False                      # update ckpt by save_interval and save_strategy
     args.init_from = None
     # args.out_dir = '/home/pc5090/Code/github/CleanGPT/out/TinyStory/TinyStory_llama_1024_512_12_10/20251023_215406'
     start_timestep = args.out_dir[args.out_dir.rfind('/')+1:]

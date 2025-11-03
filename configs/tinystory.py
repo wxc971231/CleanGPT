@@ -122,7 +122,7 @@ class TinyStoryLlamaConfig(BaseExperimentConfig):
         args.adam_beta2 = 0.99                      # make a bit bigger because number of tokens per iter is small
 
         # training setting
-        args.batch_size_per_gpu = 32                                            # training batch_size (per GPU)
+        args.batch_size_per_gpu = 4                                            # training batch_size (per GPU)
         args.batch_size = args.batch_size_per_gpu * WORLD_SIZE * args.ga_begin  # equivalent training batch_size
         args.batch_num = 64 * args.ga_begin
         args.train_iters = 256 * args.batch_num                                 # total batch_num
@@ -132,7 +132,7 @@ class TinyStoryLlamaConfig(BaseExperimentConfig):
             
         # eval setting
         args.eval_batch_num = 10
-        args.eval_batch_size_per_gpu = 128
+        args.eval_batch_size_per_gpu = 4
         args.eval_batch_size = args.eval_batch_size_per_gpu * WORLD_SIZE
         args.eval_interval = args.batch_num * 1     # keep frequent because we'll overfit
 
